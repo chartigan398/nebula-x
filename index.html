@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nebula X - Cinematic Ambient Edition</title>
+    <title>Nebula X - Morphing Shapes Edition</title>
     <style>
         body { margin: 0; background-color: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; cursor: crosshair; }
         
@@ -15,7 +15,7 @@
             color: white; 
             text-align: center;
             pointer-events: none; 
-            text-shadow: 0 0 40px rgba(0,255,255,0.7);
+            text-shadow: 0 0 40px rgba(255,255,255,0.5);
             transition: opacity 3s ease;
             z-index: 10;
         }
@@ -28,7 +28,7 @@
             bottom: 20px;
             width: 100%;
             text-align: center;
-            color: rgba(255,255,255,0.15);
+            color: rgba(255,255,255,0.3);
             font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 2px;
@@ -69,17 +69,17 @@
         #control-panel button.active { background: #0ff; color: #000; }
         #control-panel input[type="file"] { font-size: 10px; margin-top: 4px; }
 
-        canvas { display: block; filter: contrast(110%) brightness(110%); }
+        canvas { display: block; filter: saturate(1.2) brightness(1.1); }
     </style>
 </head>
 <body>
     <div id="ui">
         <h1>Nebula X</h1>
-        <p>Cinematic Deep Space Journey</p>
+        <p>Unified Spectrum • Morphing Geometry</p>
     </div>
 
     <div id="controls">
-        Press F for Fullscreen • Mouse to Influence • Click to Toggle UI • C = Clock • A = Audio
+        Scroll / Arrows to Zoom • Mouse to Warp • Click to Toggle UI • F = Fullscreen • C = Clock • A = Audio
     </div>
 
     <div id="clock" style="display: none;"></div>
@@ -89,14 +89,14 @@
         <select id="preset">
             <option value="calm">Calm</option>
             <option value="intense">Intense</option>
-            <option value="slow">Slow camera</option>
+            <option value="slow">Slow morph</option>
         </select>
+        <label>Morph speed</label>
+        <input type="range" id="morphSpeed" min="0.3" max="2" step="0.1" value="1">
         <label>Color speed</label>
-        <input type="range" id="colorSpeed" min="0.5" max="3" step="0.1" value="1">
-        <label>Camera speed</label>
+        <input type="range" id="colorSpeed" min="0.3" max="2" step="0.1" value="1">
+        <label>Camera / zoom</label>
         <input type="range" id="cameraSpeed" min="0.3" max="2" step="0.1" value="1">
-        <label>Particle speed</label>
-        <input type="range" id="particleSpeed" min="0.5" max="2" step="0.1" value="1">
         <div class="audio-row">
             <strong>Audio</strong>
             <br><button type="button" id="btnMic">Mic</button>
@@ -111,24 +111,26 @@
         const STORAGE_CLOCK = 'nebula-x-clock-visible';
 
         let scene, camera, renderer, points, geometry;
-        let positions, initialPositions, colors, sizes, phases;
-        const particleCount = 45000; 
-        
+        let positions, cloudPos, ringPos, spherePos, colors, sizes, phases;
+        const particleCount = 100000;
+
         let time = 0;
-        let colorOffset = 0;
         let uiVisible = true;
         let clockVisible = false;
         let mouse = { x: 0, y: 0 };
         let targetMouse = { x: 0, y: 0 };
 
-        // Tunable params (Phase 3)
+        let zoomDistance = 1000;
+        let targetZoom = 1000;
+        const minZoom = 100;
+        const maxZoom = 2500;
+
         let params = {
+            morphSpeed: 1,
             colorSpeed: 1,
-            cameraSpeed: 1,
-            particleSpeed: 1
+            cameraSpeed: 1
         };
 
-        // Audio (Phase 2)
         let audioCtx = null;
         let analyser = null;
         let audioEnabled = false;
@@ -136,10 +138,13 @@
         let audioSmoothing = 0.15;
         let audioSource = null;
 
+        const PI = Math.PI;
+        const PHI = 1.618033988749895;
+
         const PRESETS = {
-            calm:    { colorSpeed: 0.6, cameraSpeed: 0.5, particleSpeed: 0.6 },
-            intense: { colorSpeed: 1.8, cameraSpeed: 1.5, particleSpeed: 1.4 },
-            slow:    { colorSpeed: 0.5, cameraSpeed: 0.35, particleSpeed: 0.5 }
+            calm:   { morphSpeed: 0.5, colorSpeed: 0.5, cameraSpeed: 0.5 },
+            intense: { morphSpeed: 1.5, colorSpeed: 1.5, cameraSpeed: 1.2 },
+            slow:   { morphSpeed: 0.35, colorSpeed: 0.35, cameraSpeed: 0.4 }
         };
 
         function createStarTexture() {
@@ -149,8 +154,8 @@
             const context = canvas.getContext('2d');
             const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
             gradient.addColorStop(0, 'rgba(255,255,255,1)');
-            gradient.addColorStop(0.2, 'rgba(255,255,255,0.5)');
-            gradient.addColorStop(0.4, 'rgba(255,255,255,0.1)');
+            gradient.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+            gradient.addColorStop(0.5, 'rgba(255,255,255,0.2)');
             gradient.addColorStop(1, 'rgba(255,255,255,0)');
             context.fillStyle = gradient;
             context.fillRect(0, 0, 64, 64);
@@ -162,46 +167,52 @@
             clockVisible = localStorage.getItem(STORAGE_CLOCK) === 'true';
 
             scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x000000, 0.0007);
+            scene.fog = new THREE.FogExp2(0x000000, 0.0006);
 
-            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 4000);
-            
-            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 6000);
+            camera.position.z = zoomDistance;
+
+            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             document.body.appendChild(renderer.domElement);
 
             geometry = new THREE.BufferGeometry();
             positions = new Float32Array(particleCount * 3);
-            initialPositions = new Float32Array(particleCount * 3);
+            cloudPos = new Float32Array(particleCount * 3);
+            ringPos = new Float32Array(particleCount * 3);
+            spherePos = new Float32Array(particleCount * 3);
             colors = new Float32Array(particleCount * 3);
             sizes = new Float32Array(particleCount);
-            phases = new Float32Array(particleCount); 
+            phases = new Float32Array(particleCount);
 
             for (let i = 0; i < particleCount; i++) {
                 const i3 = i * 3;
-                const isDisc = Math.random() > 0.3;
-                let radius, theta, phi;
 
-                if (isDisc) {
-                    radius = 20 + Math.random() * 500;
-                    theta = Math.random() * Math.PI * 2;
-                    phi = (Math.PI / 2) + (Math.random() - 0.5) * 0.5; 
-                } else {
-                    radius = Math.random() * 800;
-                    theta = Math.random() * Math.PI * 2;
-                    phi = Math.acos((Math.random() * 2) - 1);
-                }
+                cloudPos[i3] = (Math.random() - 0.5) * 2000;
+                cloudPos[i3 + 1] = (Math.random() - 0.5) * 2000;
+                cloudPos[i3 + 2] = (Math.random() - 0.5) * 2000;
 
-                positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
-                positions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-                positions[i3 + 2] = radius * Math.cos(phi);
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 600 + (Math.random() - 0.5) * 200;
+                ringPos[i3] = Math.cos(angle) * radius;
+                ringPos[i3 + 1] = (Math.random() - 0.5) * 100;
+                ringPos[i3 + 2] = Math.sin(angle) * radius;
 
-                initialPositions[i3] = positions[i3];
-                initialPositions[i3 + 1] = positions[i3 + 1];
-                initialPositions[i3 + 2] = positions[i3 + 2];
+                const u = Math.random();
+                const v = Math.random();
+                const thetaS = 2 * Math.PI * u;
+                const phiS = Math.acos(2 * v - 1);
+                const rS = 400 * Math.pow(Math.random(), 1/3);
+                spherePos[i3] = rS * Math.sin(phiS) * Math.cos(thetaS);
+                spherePos[i3 + 1] = rS * Math.sin(phiS) * Math.sin(thetaS);
+                spherePos[i3 + 2] = rS * Math.cos(phiS);
 
-                sizes[i] = Math.random() < 0.05 ? 4.0 + Math.random() * 4 : 0.5 + Math.random() * 2;
+                positions[i3] = cloudPos[i3];
+                positions[i3+1] = cloudPos[i3+1];
+                positions[i3+2] = cloudPos[i3+2];
+
+                sizes[i] = 1.0 + Math.random() * 3.5;
                 phases[i] = Math.random() * Math.PI * 2;
             }
 
@@ -210,30 +221,39 @@
             geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
             const material = new THREE.PointsMaterial({
-                size: 2.2,
+                size: 4.5,
                 map: createStarTexture(),
                 vertexColors: true,
                 transparent: true,
-                opacity: 0.8,
+                opacity: 0.9,
                 blending: THREE.AdditiveBlending,
                 depthWrite: false,
                 sizeAttenuation: true
             });
+
             points = new THREE.Points(geometry, material);
             scene.add(points);
 
             window.addEventListener('mousemove', (e) => {
-                targetMouse.x = (e.clientX / window.innerWidth - 0.5) * 100;
-                targetMouse.y = (e.clientY / window.innerHeight - 0.5) * 100;
+                targetMouse.x = (e.clientX / window.innerWidth - 0.5) * 300;
+                targetMouse.y = (e.clientY / window.innerHeight - 0.5) * 300;
             });
 
-            window.addEventListener('mousedown', toggleUI);
+            window.addEventListener('wheel', (e) => {
+                targetZoom += e.deltaY * 0.5;
+                targetZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
+            }, { passive: true });
+
             window.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowUp') targetZoom -= 100;
+                else if (e.key === 'ArrowDown') targetZoom += 100;
+                targetZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
                 if (e.key === 'f' || e.key === 'F') toggleFullscreen();
                 if (e.key === 'c' || e.key === 'C') toggleClock();
                 if (e.key === 'a' || e.key === 'A') toggleAudio();
             });
 
+            window.addEventListener('mousedown', toggleUI);
             window.addEventListener('resize', onWindowResize);
 
             document.getElementById('ui').style.opacity = uiVisible ? '1' : '0';
@@ -242,9 +262,9 @@
             document.getElementById('clock').style.display = clockVisible ? 'block' : 'none';
 
             document.getElementById('preset').addEventListener('change', applyPreset);
+            document.getElementById('morphSpeed').addEventListener('input', (e) => { params.morphSpeed = +e.target.value; });
             document.getElementById('colorSpeed').addEventListener('input', (e) => { params.colorSpeed = +e.target.value; });
             document.getElementById('cameraSpeed').addEventListener('input', (e) => { params.cameraSpeed = +e.target.value; });
-            document.getElementById('particleSpeed').addEventListener('input', (e) => { params.particleSpeed = +e.target.value; });
             document.getElementById('btnMic').addEventListener('click', enableMic);
             document.getElementById('btnFile').addEventListener('click', () => document.getElementById('audioFile').click());
             document.getElementById('audioFile').addEventListener('change', enableFile);
@@ -262,11 +282,8 @@
         }
 
         function toggleFullscreen() {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(() => {});
-            } else {
-                document.exitFullscreen();
-            }
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+            else document.exitFullscreen();
         }
 
         function toggleClock() {
@@ -280,18 +297,15 @@
         function updateClock() {
             const el = document.getElementById('clock');
             if (!el || el.style.display === 'none') return;
-            const now = new Date();
-            el.textContent = now.toISOString().substr(11, 12);
+            el.textContent = new Date().toISOString().substr(11, 12);
             setTimeout(updateClock, 100);
         }
 
         function toggleAudio() {
             audioEnabled = !audioEnabled;
             document.getElementById('btnMic').classList.toggle('active', audioEnabled);
-            if (!audioEnabled && audioCtx) {
-                if (audioSource) try { audioSource.disconnect(); } catch (_) {}
-                audioLevel = 0;
-            }
+            if (!audioEnabled && audioCtx && audioSource) { try { audioSource.disconnect(); } catch (_) {} }
+            audioLevel = 0;
         }
 
         function enableMic() {
@@ -348,12 +362,12 @@
             const name = document.getElementById('preset').value;
             const p = PRESETS[name];
             if (!p) return;
+            params.morphSpeed = p.morphSpeed;
             params.colorSpeed = p.colorSpeed;
             params.cameraSpeed = p.cameraSpeed;
-            params.particleSpeed = p.particleSpeed;
+            document.getElementById('morphSpeed').value = p.morphSpeed;
             document.getElementById('colorSpeed').value = p.colorSpeed;
             document.getElementById('cameraSpeed').value = p.cameraSpeed;
-            document.getElementById('particleSpeed').value = p.particleSpeed;
         }
 
         function onWindowResize() {
@@ -364,56 +378,62 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            const dt = 0.0015 * params.particleSpeed;
-            time += dt; 
-            const level = getAudioLevel();
-            // Slow drift; no integer wrap so colors don't snap/loop
-            colorOffset += (0.00002 * params.colorSpeed) + (level * 0.005);
 
-            mouse.x += (targetMouse.x - mouse.x) * 0.02;
-            mouse.y += (targetMouse.y - mouse.y) * 0.02;
+            const dt = 0.005 * params.morphSpeed * (1 + getAudioLevel() * 0.3);
+            time += dt;
+
+            mouse.x += (targetMouse.x - mouse.x) * 0.05;
+            mouse.y += (targetMouse.y - mouse.y) * 0.05;
+            zoomDistance += (targetZoom - zoomDistance) * 0.05;
 
             const posAttr = geometry.attributes.position;
-            const colAttr = geometry.attributes.color;
             const sizeAttr = geometry.attributes.size;
+            const colAttr = geometry.attributes.color;
             const colorTool = new THREE.Color();
 
-            // Irrational multipliers so the camera path never visibly repeats
-            const camSpeed = time * 0.2 * params.cameraSpeed * (1 + level * 0.5);
-            const PI = Math.PI;
-            const PHI = 1.618033988749895;
-            camera.position.x = Math.sin(camSpeed) * 350 + mouse.x;
-            camera.position.y = Math.cos(camSpeed * PI) * 250 - mouse.y;
-            camera.position.z = Math.cos(camSpeed * PHI) * 400 + 400;
-            camera.lookAt(mouse.x * 0.5, -mouse.y * 0.5, 0);
+            const camSpeed = time * 0.1 * params.cameraSpeed * (1 + audioLevel * 0.2);
+            camera.position.x = Math.sin(camSpeed) * (zoomDistance * 0.5) + mouse.x;
+            camera.position.y = Math.cos(camSpeed * PI) * (zoomDistance * 0.3) - mouse.y;
+            camera.position.z = zoomDistance;
+            camera.lookAt(0, 0, 0);
+
+            // Irrational morph factors so shape transition doesn't visibly loop
+            const morphFactor1 = (Math.sin(time * 0.3 * PHI) + 1) / 2;
+            const morphFactor2 = (Math.cos(time * 0.2 * PI) + 1) / 2;
+            const baseHue = (time * 0.05 * params.colorSpeed + audioLevel * 0.1) % 1;
 
             for (let i = 0; i < particleCount; i++) {
                 const i3 = i * 3;
-                const slowWave = Math.sin(time * 0.2 * PI + initialPositions[i3] * 0.005);
-                const fastWave = Math.sin(time * PHI + initialPositions[i3+1] * 0.02) * 2;
-                
-                posAttr.array[i3] = initialPositions[i3] + slowWave * 10 + fastWave;
-                posAttr.array[i3+1] = initialPositions[i3+1] + slowWave * 5;
-                
-                const twinkle = Math.sin(time * 2 * PHI + phases[i]);
-                sizeAttr.array[i] = sizes[i] * (0.8 + twinkle * 0.4);
 
-                // Smooth color drift (sin so no snap when wrapping)
-                const hue = ( (initialPositions[i3] / 1000) + 0.5 + 0.5 * Math.sin(colorOffset) + (slowWave * 0.1) + 1 ) % 1;
-                colorTool.setHSL(hue, 0.8, 0.6);
+                const targetX = THREE.MathUtils.lerp(cloudPos[i3], ringPos[i3], morphFactor1);
+                const targetY = THREE.MathUtils.lerp(cloudPos[i3+1], ringPos[i3+1], morphFactor1);
+                const targetZ = THREE.MathUtils.lerp(cloudPos[i3+2], ringPos[i3+2], morphFactor1);
+
+                const finalX = THREE.MathUtils.lerp(targetX, spherePos[i3], morphFactor2);
+                const finalY = THREE.MathUtils.lerp(targetY, spherePos[i3+1], morphFactor2);
+                const finalZ = THREE.MathUtils.lerp(targetZ, spherePos[i3+2], morphFactor2);
+
+                posAttr.array[i3] = finalX + Math.sin(time + phases[i]) * 10;
+                posAttr.array[i3+1] = finalY + Math.cos(time + phases[i]) * 10;
+                posAttr.array[i3+2] = finalZ + Math.sin(time * 0.5 + phases[i]) * 10;
+
+                const lightness = 0.4 + (Math.sin(time + phases[i]) * 0.2) + audioLevel * 0.15;
+                const saturation = 0.7 + (Math.cos(time * 0.5 + phases[i]) * 0.2);
+                colorTool.setHSL(baseHue, saturation, lightness);
+
                 colAttr.array[i3] = colorTool.r;
                 colAttr.array[i3+1] = colorTool.g;
                 colAttr.array[i3+2] = colorTool.b;
+
+                const twinkle = 0.7 + Math.sin(time * 4 + phases[i]) * 0.3 + audioLevel * 0.2;
+                sizeAttr.array[i] = sizes[i] * Math.max(0.3, twinkle);
             }
 
             posAttr.needsUpdate = true;
-            colAttr.needsUpdate = true;
             sizeAttr.needsUpdate = true;
+            colAttr.needsUpdate = true;
 
-            points.material.size = 2.2 * (1 + level * 0.4);
-
-            points.rotation.y += 0.0003;
-            points.rotation.z += 0.0001;
+            points.rotation.y += 0.001;
 
             renderer.render(scene, camera);
         }
