@@ -3,6 +3,14 @@ Nebula X Visual – Version History
 
 Current stable fallbacks:
 
+- **v4**
+  - **Git commit**: cd2872b
+  - **Description**: Capture-ready build with:
+    - Center title removed for clean visuals
+    - HUD hide toggle (H) and fullscreen (F) for recording
+    - Built-in canvas recorder (R) that saves .webm with optional audio
+    - Same v3 particle behavior and audio band mapping
+
 - **v3**
   - **Git commit**: 631d34a
   - **Description**: Refined v2 with:
