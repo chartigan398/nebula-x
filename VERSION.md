@@ -4,7 +4,7 @@ Nebula X Visual – Version History
 Current stable fallbacks:
 
 - **v3**
-  - **Git commit**: (pending)
+  - **Git commit**: 631d34a
   - **Description**: Refined v2 with:
     - Softer, clamped bass impulse to keep the nebula in frame on loud material
     - Reduced radial scaling and outward push so particles react but don’t scatter out of view

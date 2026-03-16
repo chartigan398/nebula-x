@@ -73,13 +73,8 @@
     </style>
 </head>
 <body>
-    <div id="ui">
-        <h1>Nebula X</h1>
-        <p>Unified Spectrum • Morphing Geometry</p>
-    </div>
-
     <div id="controls">
-        Scroll / Arrows = Zoom • Mouse = Warp / Gravity • Click = Hide UI • F = Fullscreen • C = Clock • A = Audio Bands
+        Scroll / Arrows = Zoom • Mouse = Warp / Gravity • F = Fullscreen • C = Clock • A = Audio Bands • H = Hide HUD • R = Record
     </div>
 
     <div id="clock" style="display: none;"></div>
@@ -105,12 +100,18 @@
             <button type="button" id="btnFile">File</button>
             <br><input type="file" id="audioFile" accept="audio/*" style="display:none">
         </div>
+        <div class="audio-row">
+            <strong>Recording</strong>
+            <br><button type="button" id="btnRecord">Start</button>
+            <button type="button" id="btnStopRecord" disabled>Stop</button>
+            <div id="recordStatus" style="margin-top:4px; font-size:10px; opacity:0.7;">Idle</div>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        const STORAGE_UI = 'nebula-x-ui-visible';
         const STORAGE_CLOCK = 'nebula-x-clock-visible';
+        const STORAGE_HUD = 'nebula-x-hud-visible';
 
         let scene, camera, renderer, points, geometry;
         let positions, cloudPos, ringPos, spherePos, colors, sizes, phases;
@@ -118,7 +119,8 @@
 
         let time = 0;
         let visualTime = 0;
-        let uiVisible = true;
+        // HUD = overlays (bottom instructions + control panel). Center title removed entirely.
+        let hudVisible = true;
         let clockVisible = false;
         let mouse = { x: 0, y: 0 };
         let targetMouse = { x: 0, y: 0 };
@@ -144,6 +146,12 @@
         let audioLevel = 0;
         let audioSmoothing = 0.15;
         let audioSource = null;
+        let audioElement = null;
+
+        let audioMixDestination = null;
+        let recorder = null;
+        let recordingStream = null;
+        let recordedChunks = [];
         let bassLevel = 0;
         let midLevel = 0;
         let highLevel = 0;
@@ -203,7 +211,7 @@
         }
 
         function init() {
-            uiVisible = localStorage.getItem(STORAGE_UI) !== 'false';
+            hudVisible = localStorage.getItem(STORAGE_HUD) !== 'false';
             clockVisible = localStorage.getItem(STORAGE_CLOCK) === 'true';
 
             scene = new THREE.Scene();
@@ -296,14 +304,18 @@
                 if (e.key === 'f' || e.key === 'F') toggleFullscreen();
                 if (e.key === 'c' || e.key === 'C') toggleClock();
                 if (e.key === 'a' || e.key === 'A') toggleAudio();
+                if (e.key === 'h' || e.key === 'H') toggleHUD();
+                if (e.key === 'r' || e.key === 'R') {
+                    if (recorder && recorder.state === 'recording') stopRecording();
+                    else startRecording();
+                }
             });
 
-            window.addEventListener('mousedown', toggleUI);
+            // Click no longer toggles HUD (prevents any accidental on-screen text during takes)
             window.addEventListener('resize', onWindowResize);
 
-            document.getElementById('ui').style.opacity = uiVisible ? '1' : '0';
-            document.getElementById('controls').style.opacity = uiVisible ? '1' : '0';
-            document.getElementById('control-panel').style.opacity = uiVisible ? '1' : '0';
+            document.getElementById('controls').style.opacity = hudVisible ? '1' : '0';
+            document.getElementById('control-panel').style.opacity = hudVisible ? '1' : '0';
             document.getElementById('clock').style.display = clockVisible ? 'block' : 'none';
 
             document.getElementById('preset').addEventListener('change', applyPreset);
@@ -318,17 +330,18 @@
             document.getElementById('btnMic').addEventListener('click', enableMic);
             document.getElementById('btnFile').addEventListener('click', () => document.getElementById('audioFile').click());
             document.getElementById('audioFile').addEventListener('change', enableFile);
+            document.getElementById('btnRecord').addEventListener('click', startRecording);
+            document.getElementById('btnStopRecord').addEventListener('click', stopRecording);
 
             animate();
             if (clockVisible) updateClock();
         }
 
-        function toggleUI() {
-            uiVisible = !uiVisible;
-            localStorage.setItem(STORAGE_UI, String(uiVisible));
-            document.getElementById('ui').style.opacity = uiVisible ? '1' : '0';
-            document.getElementById('controls').style.opacity = uiVisible ? '1' : '0';
-            document.getElementById('control-panel').style.opacity = uiVisible ? '1' : '0';
+        function toggleHUD() {
+            hudVisible = !hudVisible;
+            localStorage.setItem(STORAGE_HUD, String(hudVisible));
+            document.getElementById('controls').style.opacity = hudVisible ? '1' : '0';
+            document.getElementById('control-panel').style.opacity = hudVisible ? '1' : '0';
         }
 
         function toggleFullscreen() {
@@ -358,15 +371,27 @@
             audioLevel = 0;
         }
 
+        function ensureAudioGraph() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (!analyser) {
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 1024;
+                analyser.smoothingTimeConstant = 0.7;
+            }
+            if (!audioMixDestination) {
+                audioMixDestination = audioCtx.createMediaStreamDestination();
+                // keep it audible too
+                analyser.connect(audioCtx.destination);
+                analyser.connect(audioMixDestination);
+            }
+        }
+
         function enableMic() {
             if (audioEnabled && analyser) { toggleAudio(); return; }
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                if (!audioCtx) {
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    analyser = audioCtx.createAnalyser();
-                    analyser.fftSize = 1024;
-                    analyser.smoothingTimeConstant = 0.7;
-                }
+                ensureAudioGraph();
                 if (audioSource) try { audioSource.disconnect(); } catch (_) {}
                 audioSource = audioCtx.createMediaStreamSource(stream);
                 audioSource.connect(analyser);
@@ -379,22 +404,20 @@
             const file = e.target.files[0];
             if (!file) return;
             const url = URL.createObjectURL(file);
-            const audio = new Audio(url);
-            audio.crossOrigin = 'anonymous';
-            audio.play().catch(() => {});
-
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 1024;
-                analyser.smoothingTimeConstant = 0.7;
+            if (audioElement) {
+                try { audioElement.pause(); } catch (_) {}
+                audioElement = null;
             }
+            audioElement = new Audio(url);
+            audioElement.crossOrigin = 'anonymous';
+
+            ensureAudioGraph();
             if (audioSource) try { audioSource.disconnect(); } catch (_) {}
-            audioSource = audioCtx.createMediaElementSource(audio);
+            audioSource = audioCtx.createMediaElementSource(audioElement);
             audioSource.connect(analyser);
-            analyser.connect(audioCtx.destination);
             audioEnabled = true;
             document.getElementById('btnMic').classList.add('active');
+            audioElement.play().catch(() => {});
         }
 
         function computeAudioBands() {
@@ -465,6 +488,83 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function setRecordStatus(text) {
+            const el = document.getElementById('recordStatus');
+            if (el) el.textContent = text;
+        }
+
+        function startRecording() {
+            if (!renderer) return;
+            if (recorder && recorder.state === 'recording') return;
+
+            const canvas = renderer.domElement;
+            const fps = 60;
+            const canvasStream = canvas.captureStream ? canvas.captureStream(fps) : null;
+            if (!canvasStream) {
+                setRecordStatus('Recording not supported in this browser.');
+                return;
+            }
+
+            const tracks = [...canvasStream.getVideoTracks()];
+            if (audioMixDestination && audioMixDestination.stream) {
+                const aTracks = audioMixDestination.stream.getAudioTracks();
+                if (aTracks.length) tracks.push(aTracks[0]);
+            }
+
+            recordingStream = new MediaStream(tracks);
+            recordedChunks = [];
+
+            // Prefer widely supported codecs
+            const mimeCandidates = [
+                'video/webm;codecs=vp9,opus',
+                'video/webm;codecs=vp8,opus',
+                'video/webm'
+            ];
+            let mimeType = '';
+            for (const m of mimeCandidates) {
+                if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) { mimeType = m; break; }
+            }
+
+            try {
+                recorder = new MediaRecorder(recordingStream, mimeType ? { mimeType } : undefined);
+            } catch (e) {
+                setRecordStatus('Recorder init failed.');
+                return;
+            }
+
+            recorder.ondataavailable = (evt) => {
+                if (evt.data && evt.data.size > 0) recordedChunks.push(evt.data);
+            };
+            recorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: recorder.mimeType || 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `nebula-x-recording-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 10_000);
+                setRecordStatus('Saved .webm download.');
+            };
+
+            recorder.start(1000); // 1s chunks keeps memory stable for long takes
+            document.getElementById('btnRecord').disabled = true;
+            document.getElementById('btnStopRecord').disabled = false;
+            setRecordStatus('Recording… (R to stop)');
+
+            // Hide HUD automatically while recording so it never appears in the capture
+            if (hudVisible) toggleHUD();
+        }
+
+        function stopRecording() {
+            if (!recorder || recorder.state !== 'recording') return;
+            recorder.stop();
+            document.getElementById('btnRecord').disabled = false;
+            document.getElementById('btnStopRecord').disabled = true;
+            setRecordStatus('Finalizing…');
         }
 
         function animate() {
