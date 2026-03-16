@@ -79,7 +79,7 @@
     </div>
 
     <div id="controls">
-        Scroll / Arrows to Zoom • Mouse to Warp • Click to Toggle UI • F = Fullscreen • C = Clock • A = Audio
+        Scroll / Arrows = Zoom • Mouse = Warp / Gravity • Click = Hide UI • F = Fullscreen • C = Clock • A = Audio Bands
     </div>
 
     <div id="clock" style="display: none;"></div>
@@ -97,6 +97,8 @@
         <input type="range" id="colorSpeed" min="0.3" max="2" step="0.1" value="1">
         <label>Camera / zoom</label>
         <input type="range" id="cameraSpeed" min="0.3" max="2" step="0.1" value="1">
+        <label>Flow / gravity</label>
+        <input type="range" id="fieldStrength" min="0" max="1.5" step="0.05" value="0.6">
         <div class="audio-row">
             <strong>Audio</strong>
             <br><button type="button" id="btnMic">Mic</button>
@@ -115,6 +117,7 @@
         const particleCount = 100000;
 
         let time = 0;
+        let visualTime = 0;
         let uiVisible = true;
         let clockVisible = false;
         let mouse = { x: 0, y: 0 };
@@ -128,8 +131,12 @@
         let params = {
             morphSpeed: 1,
             colorSpeed: 1,
-            cameraSpeed: 1
+            cameraSpeed: 1,
+            flowStrength: 0.6,
+            gravityStrength: 0.6
         };
+
+        const gravityBaseStrength = 0.0005;
 
         let audioCtx = null;
         let analyser = null;
@@ -137,6 +144,10 @@
         let audioLevel = 0;
         let audioSmoothing = 0.15;
         let audioSource = null;
+        let bassLevel = 0;
+        let midLevel = 0;
+        let highLevel = 0;
+        let bassImpulse = 0;
 
         const PI = Math.PI;
         const PHI = 1.618033988749895;
@@ -146,6 +157,35 @@
             intense: { morphSpeed: 1.5, colorSpeed: 1.5, cameraSpeed: 1.2 },
             slow:   { morphSpeed: 0.35, colorSpeed: 0.35, cameraSpeed: 0.4 }
         };
+
+        const timelinePhases = [
+            { duration: 600, density: 0.4, saturation: 0.5, zoomFactor: 0.8 },
+            { duration: 600, density: 0.7, saturation: 0.7, zoomFactor: 1.0 },
+            { duration: 900, density: 1.0, saturation: 0.9, zoomFactor: 1.2 }
+        ];
+
+        function getTimelineState(dt) {
+            visualTime += dt;
+            let t = visualTime;
+            let current = timelinePhases[0];
+            for (let i = 0; i < timelinePhases.length; i++) {
+                const ph = timelinePhases[i];
+                if (t <= ph.duration) {
+                    current = ph;
+                    break;
+                }
+                t -= ph.duration;
+                if (i === timelinePhases.length - 1) current = ph;
+            }
+            let acc = 0;
+            for (let i = 0; i < timelinePhases.length; i++) acc += timelinePhases[i].duration;
+            const cycleT = visualTime % acc;
+            let macroZoom = 1;
+            let zt = cycleT / acc;
+            if (zt < 0.5) macroZoom = 0.8 + 0.6 * (zt / 0.5);
+            else macroZoom = 1.4 - 0.4 * ((zt - 0.5) / 0.5);
+            return { phase: current, macroZoom };
+        }
 
         function createStarTexture() {
             const canvas = document.createElement('canvas');
@@ -212,6 +252,11 @@
                 positions[i3+1] = cloudPos[i3+1];
                 positions[i3+2] = cloudPos[i3+2];
 
+                // Default all particles to white so they are clearly visible
+                colors[i3] = 1;
+                colors[i3 + 1] = 1;
+                colors[i3 + 2] = 1;
+
                 sizes[i] = 1.0 + Math.random() * 3.5;
                 phases[i] = Math.random() * Math.PI * 2;
             }
@@ -265,6 +310,11 @@
             document.getElementById('morphSpeed').addEventListener('input', (e) => { params.morphSpeed = +e.target.value; });
             document.getElementById('colorSpeed').addEventListener('input', (e) => { params.colorSpeed = +e.target.value; });
             document.getElementById('cameraSpeed').addEventListener('input', (e) => { params.cameraSpeed = +e.target.value; });
+            document.getElementById('fieldStrength').addEventListener('input', (e) => {
+                const v = +e.target.value;
+                params.flowStrength = v;
+                params.gravityStrength = v;
+            });
             document.getElementById('btnMic').addEventListener('click', enableMic);
             document.getElementById('btnFile').addEventListener('click', () => document.getElementById('audioFile').click());
             document.getElementById('audioFile').addEventListener('change', enableFile);
@@ -314,8 +364,8 @@
                 if (!audioCtx) {
                     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                     analyser = audioCtx.createAnalyser();
-                    analyser.fftSize = 256;
-                    analyser.smoothingTimeConstant = 0.8;
+                    analyser.fftSize = 1024;
+                    analyser.smoothingTimeConstant = 0.7;
                 }
                 if (audioSource) try { audioSource.disconnect(); } catch (_) {}
                 audioSource = audioCtx.createMediaStreamSource(stream);
@@ -336,8 +386,8 @@
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 256;
-                analyser.smoothingTimeConstant = 0.8;
+                analyser.fftSize = 1024;
+                analyser.smoothingTimeConstant = 0.7;
             }
             if (audioSource) try { audioSource.disconnect(); } catch (_) {}
             audioSource = audioCtx.createMediaElementSource(audio);
@@ -347,15 +397,53 @@
             document.getElementById('btnMic').classList.add('active');
         }
 
-        function getAudioLevel() {
-            if (!audioEnabled || !analyser) return 0;
+        function computeAudioBands() {
+            if (!audioEnabled || !analyser) {
+                bassLevel *= 0.9;
+                midLevel *= 0.9;
+                highLevel *= 0.9;
+                audioLevel *= 0.9;
+                return;
+            }
             const data = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(data);
-            let sum = 0;
-            for (let i = 0; i < data.length; i++) sum += data[i];
-            const level = (sum / data.length) / 255;
-            audioLevel += (level - audioLevel) * audioSmoothing;
-            return audioLevel;
+
+            const nyquist = (audioCtx && audioCtx.sampleRate ? audioCtx.sampleRate : 44100) / 2;
+            const binHz = nyquist / data.length;
+
+            let bassSum = 0, bassCount = 0;
+            let midSum = 0, midCount = 0;
+            let highSum = 0, highCount = 0;
+
+            for (let i = 0; i < data.length; i++) {
+                const freq = i * binHz;
+                const v = data[i] / 255;
+                if (freq < 20) continue;
+                if (freq < 250) {
+                    bassSum += v; bassCount++;
+                } else if (freq < 4000) {
+                    midSum += v; midCount++;
+                } else if (freq < 20000) {
+                    highSum += v; highCount++;
+                }
+            }
+
+            const bassInstant = bassCount ? bassSum / bassCount : 0;
+            const midInstant = midCount ? midSum / midCount : 0;
+            const highInstant = highCount ? highSum / highCount : 0;
+
+            const smooth = audioSmoothing;
+            bassLevel += (bassInstant - bassLevel) * smooth;
+            midLevel += (midInstant - midLevel) * smooth;
+            highLevel += (highInstant - highLevel) * smooth;
+
+            const mix = 0.6 * bassLevel + 0.3 * midLevel + 0.1 * highLevel;
+            audioLevel += (mix - audioLevel) * smooth;
+
+            const bassThreshold = 0.25;
+            if (bassLevel > bassThreshold) {
+                bassImpulse += 3 * (bassLevel - bassThreshold);
+            }
         }
 
         function applyPreset() {
@@ -368,6 +456,7 @@
             document.getElementById('morphSpeed').value = p.morphSpeed;
             document.getElementById('colorSpeed').value = p.colorSpeed;
             document.getElementById('cameraSpeed').value = p.cameraSpeed;
+            document.getElementById('fieldStrength').value = params.flowStrength;
         }
 
         function onWindowResize() {
@@ -379,12 +468,18 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            const dt = 0.005 * params.morphSpeed * (1 + getAudioLevel() * 0.3);
+            computeAudioBands();
+
+            const dt = 0.005 * params.morphSpeed * (1 + audioLevel * 0.3);
             time += dt;
+            const timeline = getTimelineState(dt);
+
+            bassImpulse *= 0.9;
 
             mouse.x += (targetMouse.x - mouse.x) * 0.05;
             mouse.y += (targetMouse.y - mouse.y) * 0.05;
-            zoomDistance += (targetZoom - zoomDistance) * 0.05;
+            const zoomTargetWithTimeline = targetZoom * timeline.phase.zoomFactor * timeline.macroZoom;
+            zoomDistance += (zoomTargetWithTimeline - zoomDistance) * 0.05;
 
             const posAttr = geometry.attributes.position;
             const sizeAttr = geometry.attributes.size;
@@ -397,9 +492,13 @@
             camera.position.z = zoomDistance;
             camera.lookAt(0, 0, 0);
 
-            // Irrational morph factors so shape transition doesn't visibly loop
-            const morphFactor1 = (Math.sin(time * 0.3 * PHI) + 1) / 2;
-            const morphFactor2 = (Math.cos(time * 0.2 * PI) + 1) / 2;
+            // Morph driven by time, nudged by mid band
+            const baseMorph1 = (Math.sin(time * 0.3 * PHI) + 1) / 2;
+            const baseMorph2 = (Math.cos(time * 0.2 * PI) + 1) / 2;
+            const midInfluence = 0.6 * midLevel;
+            const morphFactor1 = baseMorph1 * (1 - midInfluence) + midInfluence * midLevel;
+            const morphFactor2 = baseMorph2 * (1 - midInfluence) + midInfluence * midLevel;
+
             const baseHue = (time * 0.05 * params.colorSpeed + audioLevel * 0.1) % 1;
 
             for (let i = 0; i < particleCount; i++) {
@@ -413,20 +512,62 @@
                 const finalY = THREE.MathUtils.lerp(targetY, spherePos[i3+1], morphFactor2);
                 const finalZ = THREE.MathUtils.lerp(targetZ, spherePos[i3+2], morphFactor2);
 
-                posAttr.array[i3] = finalX + Math.sin(time + phases[i]) * 10;
-                posAttr.array[i3+1] = finalY + Math.cos(time + phases[i]) * 10;
-                posAttr.array[i3+2] = finalZ + Math.sin(time * 0.5 + phases[i]) * 10;
+                // Base position before fields
+                let fx = finalX;
+                let fy = finalY;
+                let fz = finalZ;
 
-                const lightness = 0.4 + (Math.sin(time + phases[i]) * 0.2) + audioLevel * 0.15;
-                const saturation = 0.7 + (Math.cos(time * 0.5 + phases[i]) * 0.2);
+                // Gravity well around cursor (project cursor into scene plane z=0)
+                const cursorX = mouse.x;
+                const cursorY = -mouse.y;
+                const dx = cursorX - fx;
+                const dy = cursorY - fy;
+                const dz = 0 - fz;
+                const r2 = dx * dx + dy * dy + dz * dz + 50;
+                const gStrength = gravityBaseStrength * params.gravityStrength * (1 + bassLevel * 4);
+                const gScale = gStrength / r2;
+                fx += dx * gScale;
+                fy += dy * gScale;
+                fz += dz * gScale;
+
+                // Flow field (fake noise-based wind) steered by mouse
+                const flowBase = params.flowStrength * (0.5 + midLevel);
+                const n = Math.sin(fx * 0.0007 + time * 0.6) * Math.cos(fz * 0.0005 + time * 0.4);
+                const flowDirX = Math.cos(time * 0.1) + (mouse.x / 300);
+                const flowDirZ = Math.sin(time * 0.13) + (mouse.y / 300);
+                fx += flowDirX * n * 15 * flowBase;
+                fz += flowDirZ * n * 15 * flowBase;
+
+                // Bass-driven radial impulse (scale & outward push)
+                const radialDirX = fx;
+                const radialDirY = fy;
+                const radialDirZ = fz;
+                const radialLen = Math.sqrt(radialDirX * radialDirX + radialDirY * radialDirY + radialDirZ * radialDirZ) + 1e-3;
+                const radialScale = 1 + bassImpulse * 0.6;
+
+                const baseX = fx * radialScale + (radialDirX / radialLen) * bassImpulse * 30;
+                const baseY = fy * radialScale + (radialDirY / radialLen) * bassImpulse * 30;
+                const baseZ = fz * radialScale + (radialDirZ / radialLen) * bassImpulse * 30;
+
+                const highJitter = 1 + highLevel * 3;
+
+                posAttr.array[i3] = baseX + Math.sin(time + phases[i]) * 10 * highJitter;
+                posAttr.array[i3+1] = baseY + Math.cos(time + phases[i]) * 10 * highJitter;
+                posAttr.array[i3+2] = baseZ + Math.sin(time * 0.5 + phases[i]) * 10 * highJitter;
+
+                const densityMask = 1;
+                const lightness = 0.4 + (Math.sin(time + phases[i]) * 0.2) + audioLevel * 0.15 + bassLevel * 0.1;
+                const saturation = timeline.phase.saturation + (Math.cos(time * 0.5 + phases[i]) * 0.2);
                 colorTool.setHSL(baseHue, saturation, lightness);
 
                 colAttr.array[i3] = colorTool.r;
                 colAttr.array[i3+1] = colorTool.g;
                 colAttr.array[i3+2] = colorTool.b;
 
-                const twinkle = 0.7 + Math.sin(time * 4 + phases[i]) * 0.3 + audioLevel * 0.2;
-                sizeAttr.array[i] = sizes[i] * Math.max(0.3, twinkle);
+                const twinkle = 0.7
+                    + Math.sin(time * 4 + phases[i]) * (0.2 + highLevel * 0.5)
+                    + audioLevel * 0.1;
+                sizeAttr.array[i] = sizes[i] * Math.max(0.3, twinkle) * densityMask;
             }
 
             posAttr.needsUpdate = true;
