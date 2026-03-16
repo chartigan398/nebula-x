@@ -369,6 +369,7 @@
             document.getElementById('btnMic').classList.toggle('active', audioEnabled);
             if (!audioEnabled && audioCtx && audioSource) { try { audioSource.disconnect(); } catch (_) {} }
             audioLevel = 0;
+            setRecordStatus(audioEnabled ? 'Audio bands: ON' : 'Audio bands: OFF');
         }
 
         function ensureAudioGraph() {
@@ -498,6 +499,9 @@
         function startRecording() {
             if (!renderer) return;
             if (recorder && recorder.state === 'recording') return;
+
+            // Ensure we have an audio stream available if using Mic/File
+            if (audioEnabled) ensureAudioGraph();
 
             const canvas = renderer.domElement;
             const fps = 60;
