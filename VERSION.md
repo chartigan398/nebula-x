@@ -3,6 +3,13 @@ Nebula X Visual – Version History
 
 Current stable fallbacks:
 
+- **v3**
+  - **Git commit**: (pending)
+  - **Description**: Refined v2 with:
+    - Softer, clamped bass impulse to keep the nebula in frame on loud material
+    - Reduced radial scaling and outward push so particles react but don’t scatter out of view
+    - Same synesthetic band logic (bass/mid/high), gravity/flow fields, and long-form timeline as v2
+
 - **v1**
   - **Git commit**: bffe133
   - **Description**: Nebula X Morphing Shapes edition with:

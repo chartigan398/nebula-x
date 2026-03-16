@@ -442,7 +442,9 @@
 
             const bassThreshold = 0.25;
             if (bassLevel > bassThreshold) {
-                bassImpulse += 3 * (bassLevel - bassThreshold);
+                // Softer, clamped bass impulse so particles don't blow out of view
+                bassImpulse += 1.5 * (bassLevel - bassThreshold);
+                if (bassImpulse > 1.0) bassImpulse = 1.0;
             }
         }
 
@@ -474,7 +476,8 @@
             time += dt;
             const timeline = getTimelineState(dt);
 
-            bassImpulse *= 0.9;
+            // Stronger decay so any bass push settles quickly
+            bassImpulse *= 0.85;
 
             mouse.x += (targetMouse.x - mouse.x) * 0.05;
             mouse.y += (targetMouse.y - mouse.y) * 0.05;
@@ -543,11 +546,13 @@
                 const radialDirY = fy;
                 const radialDirZ = fz;
                 const radialLen = Math.sqrt(radialDirX * radialDirX + radialDirY * radialDirY + radialDirZ * radialDirZ) + 1e-3;
-                const radialScale = 1 + bassImpulse * 0.6;
+                // Keep radial scaling subtle so structure stays in frame
+                const radialScale = 1 + bassImpulse * 0.25;
 
-                const baseX = fx * radialScale + (radialDirX / radialLen) * bassImpulse * 30;
-                const baseY = fy * radialScale + (radialDirY / radialLen) * bassImpulse * 30;
-                const baseZ = fz * radialScale + (radialDirZ / radialLen) * bassImpulse * 30;
+                // Much smaller outward push so particles don't scatter off-screen
+                const baseX = fx * radialScale + (radialDirX / radialLen) * bassImpulse * 8;
+                const baseY = fy * radialScale + (radialDirY / radialLen) * bassImpulse * 8;
+                const baseZ = fz * radialScale + (radialDirZ / radialLen) * bassImpulse * 8;
 
                 const highJitter = 1 + highLevel * 3;
 
