@@ -3,6 +3,14 @@ Nebula X Visual – Version History
 
 Current stable fallbacks:
 
+- **v5**
+  - **Git commit**: 6f741c3
+  - **Description**: Continuous-flow edition with:
+    - v4 capture features (HUD hide, fullscreen, recorder)
+    - Motion speed decoupled from audio for smooth waves
+    - Camera zoom breathing disabled; only gentle user-driven zoom
+    - Softer gravity/flow for non-lurchy ambient motion
+
 - **v4**
   - **Git commit**: cd2872b
   - **Description**: Capture-ready build with:
