@@ -576,7 +576,8 @@
 
             computeAudioBands();
 
-            const dt = 0.005 * params.morphSpeed * (1 + audioLevel * 0.3);
+            // Continuous mode: decouple motion speed from audio to avoid lurching.
+            const dt = 0.005 * params.morphSpeed;
             time += dt;
             const timeline = getTimelineState(dt);
 
@@ -585,15 +586,15 @@
 
             mouse.x += (targetMouse.x - mouse.x) * 0.05;
             mouse.y += (targetMouse.y - mouse.y) * 0.05;
-            const zoomTargetWithTimeline = targetZoom * timeline.phase.zoomFactor * timeline.macroZoom;
-            zoomDistance += (zoomTargetWithTimeline - zoomDistance) * 0.05;
+            // Continuous mode: disable macro/timeline zoom breathing (it can feel like lurching).
+            zoomDistance += (targetZoom - zoomDistance) * 0.04;
 
             const posAttr = geometry.attributes.position;
             const sizeAttr = geometry.attributes.size;
             const colAttr = geometry.attributes.color;
             const colorTool = new THREE.Color();
 
-            const camSpeed = time * 0.1 * params.cameraSpeed * (1 + audioLevel * 0.2);
+            const camSpeed = time * 0.09 * params.cameraSpeed;
             camera.position.x = Math.sin(camSpeed) * (zoomDistance * 0.5) + mouse.x;
             camera.position.y = Math.cos(camSpeed * PI) * (zoomDistance * 0.3) - mouse.y;
             camera.position.z = zoomDistance;
@@ -631,19 +632,21 @@
                 const dy = cursorY - fy;
                 const dz = 0 - fz;
                 const r2 = dx * dx + dy * dy + dz * dz + 50;
-                const gStrength = gravityBaseStrength * params.gravityStrength * (1 + bassLevel * 4);
+                // Keep gravity musically consistent but not punchy/jolty.
+                const gStrength = gravityBaseStrength * params.gravityStrength * (1 + bassLevel * 0.8);
                 const gScale = gStrength / r2;
                 fx += dx * gScale;
                 fy += dy * gScale;
                 fz += dz * gScale;
 
                 // Flow field (fake noise-based wind) steered by mouse
-                const flowBase = params.flowStrength * (0.5 + midLevel);
-                const n = Math.sin(fx * 0.0007 + time * 0.6) * Math.cos(fz * 0.0005 + time * 0.4);
-                const flowDirX = Math.cos(time * 0.1) + (mouse.x / 300);
-                const flowDirZ = Math.sin(time * 0.13) + (mouse.y / 300);
-                fx += flowDirX * n * 15 * flowBase;
-                fz += flowDirZ * n * 15 * flowBase;
+                // Continuous flow: no beat-driven scaling, softer field.
+                const flowBase = params.flowStrength * 0.55;
+                const n = Math.sin(fx * 0.0005 + time * 0.35) * Math.cos(fz * 0.0004 + time * 0.25);
+                const flowDirX = Math.cos(time * 0.06) + (mouse.x / 450);
+                const flowDirZ = Math.sin(time * 0.08) + (mouse.y / 450);
+                fx += flowDirX * n * 9 * flowBase;
+                fz += flowDirZ * n * 9 * flowBase;
 
                 // Bass-driven radial impulse (scale & outward push)
                 const radialDirX = fx;
