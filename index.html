@@ -74,10 +74,11 @@
 </head>
 <body>
     <div id="controls">
-        Scroll / Arrows = Zoom • Mouse = Warp / Gravity • F = Fullscreen • C = Clock • A = Audio Bands • H = Hide HUD • R = Record
+        Scroll / Arrows = Zoom • Mouse = Warp / Gravity • F = Fullscreen • C = Clock • A = Audio Bands • P = Palette • D = Debug • H = Hide HUD • R = Record
     </div>
 
     <div id="clock" style="display: none;"></div>
+    <div id="debug-panel" style="display:none; position:absolute; top:20px; right:20px; z-index:20; background:rgba(0,0,0,0.65); color:#7fffd4; font-family:monospace; font-size:11px; line-height:1.4; padding:10px; border-radius:8px; white-space:pre;"></div>
 
     <div id="control-panel">
         <strong>Preset</strong>
@@ -147,6 +148,7 @@
         let audioSmoothing = 0.15;
         let audioSource = null;
         let audioElement = null;
+        let paletteMode = 'cyberpunk'; // 'cyberpunk' | 'reactor'
 
         let audioMixDestination = null;
         let recorder = null;
@@ -156,6 +158,27 @@
         let midLevel = 0;
         let highLevel = 0;
         let bassImpulse = 0;
+        let pulseEnergy = 0;
+        let timeDomainData = null;
+        let debugVisible = false;
+        let debugTick = 0;
+
+        const audioFeatures = {
+            rms: 0,
+            centroid: 0,
+            rolloff: 0,
+            onset: 0,
+            bassNorm: 0,
+            midNorm: 0,
+            highNorm: 0,
+            autoGain: 1
+        };
+        const audioFeatureEnv = {
+            rms: 0,
+            bass: 0,
+            mid: 0,
+            high: 0
+        };
 
         const PI = Math.PI;
         const PHI = 1.618033988749895;
@@ -305,6 +328,14 @@
                 if (e.key === 'c' || e.key === 'C') toggleClock();
                 if (e.key === 'a' || e.key === 'A') toggleAudio();
                 if (e.key === 'h' || e.key === 'H') toggleHUD();
+                if (e.key === 'p' || e.key === 'P') {
+                    paletteMode = paletteMode === 'cyberpunk' ? 'reactor' : 'cyberpunk';
+                    setRecordStatus(`Palette: ${paletteMode}`);
+                }
+                if (e.key === 'd' || e.key === 'D') {
+                    debugVisible = !debugVisible;
+                    document.getElementById('debug-panel').style.display = debugVisible ? 'block' : 'none';
+                }
                 if (e.key === 'r' || e.key === 'R') {
                     if (recorder && recorder.state === 'recording') stopRecording();
                     else startRecording();
@@ -427,10 +458,15 @@
                 midLevel *= 0.9;
                 highLevel *= 0.9;
                 audioLevel *= 0.9;
+                audioFeatures.onset *= 0.9;
                 return;
             }
             const data = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(data);
+            if (!timeDomainData || timeDomainData.length !== analyser.fftSize) {
+                timeDomainData = new Uint8Array(analyser.fftSize);
+            }
+            analyser.getByteTimeDomainData(timeDomainData);
 
             const nyquist = (audioCtx && audioCtx.sampleRate ? audioCtx.sampleRate : 44100) / 2;
             const binHz = nyquist / data.length;
@@ -461,14 +497,66 @@
             midLevel += (midInstant - midLevel) * smooth;
             highLevel += (highInstant - highLevel) * smooth;
 
+            // Phase 1 feature normalization + auto-gain
+            audioFeatureEnv.bass += (bassLevel - audioFeatureEnv.bass) * 0.01;
+            audioFeatureEnv.mid += (midLevel - audioFeatureEnv.mid) * 0.01;
+            audioFeatureEnv.high += (highLevel - audioFeatureEnv.high) * 0.01;
+
+            const targetMid = 0.35;
+            const desiredGain = targetMid / Math.max(0.08, audioFeatureEnv.mid);
+            audioFeatures.autoGain += (desiredGain - audioFeatures.autoGain) * 0.01;
+            audioFeatures.autoGain = Math.min(2.5, Math.max(0.5, audioFeatures.autoGain));
+            audioFeatures.bassNorm = Math.min(1, bassLevel * audioFeatures.autoGain);
+            audioFeatures.midNorm = Math.min(1, midLevel * audioFeatures.autoGain);
+            audioFeatures.highNorm = Math.min(1, highLevel * audioFeatures.autoGain);
+
             const mix = 0.6 * bassLevel + 0.3 * midLevel + 0.1 * highLevel;
             audioLevel += (mix - audioLevel) * smooth;
+
+            // RMS + onset + centroid + rolloff
+            let sumSq = 0;
+            for (let i = 0; i < timeDomainData.length; i++) {
+                const centered = (timeDomainData[i] - 128) / 128;
+                sumSq += centered * centered;
+            }
+            const rms = Math.sqrt(sumSq / timeDomainData.length);
+            const prevRmsEnv = audioFeatureEnv.rms;
+            audioFeatureEnv.rms += (rms - audioFeatureEnv.rms) * 0.04;
+            const flux = Math.max(0, rms - prevRmsEnv);
+            audioFeatures.onset += (flux - audioFeatures.onset) * 0.2;
+            audioFeatures.rms = audioFeatureEnv.rms;
+
+            let weightedFreq = 0;
+            let weightedMag = 0;
+            let totalMag = 0;
+            let cumulative = 0;
+            let rolloffFreq = 0;
+            for (let i = 0; i < data.length; i++) {
+                const freq = i * binHz;
+                const mag = data[i] / 255;
+                weightedFreq += freq * mag;
+                weightedMag += mag;
+                totalMag += mag;
+            }
+            const rolloffTarget = totalMag * 0.85;
+            for (let i = 0; i < data.length; i++) {
+                const mag = data[i] / 255;
+                cumulative += mag;
+                if (cumulative >= rolloffTarget) {
+                    rolloffFreq = i * binHz;
+                    break;
+                }
+            }
+            audioFeatures.centroid = weightedMag > 0 ? weightedFreq / weightedMag : 0;
+            audioFeatures.rolloff = rolloffFreq;
 
             const bassThreshold = 0.25;
             if (bassLevel > bassThreshold) {
                 // Softer, clamped bass impulse so particles don't blow out of view
                 bassImpulse += 1.5 * (bassLevel - bassThreshold);
                 if (bassImpulse > 1.0) bassImpulse = 1.0;
+                pulseEnergy += 0.9 * (bassLevel - bassThreshold);
+                if (pulseEnergy > 1.0) pulseEnergy = 1.0;
             }
         }
 
@@ -583,6 +671,7 @@
 
             // Stronger decay so any bass push settles quickly
             bassImpulse *= 0.85;
+            pulseEnergy *= 0.9;
 
             mouse.x += (targetMouse.x - mouse.x) * 0.05;
             mouse.y += (targetMouse.y - mouse.y) * 0.05;
@@ -607,7 +696,9 @@
             const morphFactor1 = baseMorph1 * (1 - midInfluence) + midInfluence * midLevel;
             const morphFactor2 = baseMorph2 * (1 - midInfluence) + midInfluence * midLevel;
 
-            const baseHue = (time * 0.05 * params.colorSpeed + audioLevel * 0.1) % 1;
+            // Neon palette driver: global hue + traveling delayed wave through the particle field.
+            const baseHue = (time * 0.03 * params.colorSpeed + audioLevel * 0.06) % 1;
+            const colorWavePhase = time * 0.9 * params.colorSpeed;
 
             for (let i = 0; i < particleCount; i++) {
                 const i3 = i * 3;
@@ -632,16 +723,19 @@
                 const dy = cursorY - fy;
                 const dz = 0 - fz;
                 const r2 = dx * dx + dy * dy + dz * dz + 50;
-                // Keep gravity musically consistent but not punchy/jolty.
-                const gStrength = gravityBaseStrength * params.gravityStrength * (1 + bassLevel * 0.8);
+                // Phase 2 Step 2:
+                // Magnet cohesion tied to normalized bass + onset.
+                // This increases "re-form" pressure when low-end energy is active.
+                const magnetDrive = Math.min(1, audioFeatures.bassNorm * 0.8 + audioFeatures.onset * 4.0);
+                const gStrength = gravityBaseStrength * params.gravityStrength * (0.6 + magnetDrive * 1.4);
                 const gScale = gStrength / r2;
                 fx += dx * gScale;
                 fy += dy * gScale;
                 fz += dz * gScale;
 
-                // Flow field (fake noise-based wind) steered by mouse
-                // Continuous flow: no beat-driven scaling, softer field.
-                const flowBase = params.flowStrength * 0.55;
+                // Phase 2 Step 1:
+                // Pad-driven smooth flow (uses normalized mids from Phase 1 audio core).
+                const flowBase = params.flowStrength * (0.35 + audioFeatures.midNorm * 0.65);
                 const n = Math.sin(fx * 0.0005 + time * 0.35) * Math.cos(fz * 0.0004 + time * 0.25);
                 const flowDirX = Math.cos(time * 0.06) + (mouse.x / 450);
                 const flowDirZ = Math.sin(time * 0.08) + (mouse.y / 450);
@@ -653,8 +747,9 @@
                 const radialDirY = fy;
                 const radialDirZ = fz;
                 const radialLen = Math.sqrt(radialDirX * radialDirX + radialDirY * radialDirY + radialDirZ * radialDirZ) + 1e-3;
-                // Keep radial scaling subtle so structure stays in frame
-                const radialScale = 1 + bassImpulse * 0.25;
+                // Slightly stronger but bounded outward bloom on low-end activity
+                const bloomDrive = Math.min(1, audioFeatures.bassNorm * 0.7 + audioFeatures.onset * 3.0);
+                const radialScale = 1 + bloomDrive * 0.16;
 
                 // Much smaller outward push so particles don't scatter off-screen
                 const baseX = fx * radialScale + (radialDirX / radialLen) * bassImpulse * 8;
@@ -662,15 +757,48 @@
                 const baseZ = fz * radialScale + (radialDirZ / radialLen) * bassImpulse * 8;
 
                 const highJitter = 1 + highLevel * 3;
+                // Hook behavior: contraction then bloom on stronger moments, with smooth return.
+                const pulse = Math.min(1, pulseEnergy * 1.4);
+                const contract = pulse * 0.06; // slight pull-in
+                const bloom = pulse * 0.18;    // bigger outward bloom
+                const pulseScale = 1 - contract + bloom;
 
-                posAttr.array[i3] = baseX + Math.sin(time + phases[i]) * 10 * highJitter;
-                posAttr.array[i3+1] = baseY + Math.cos(time + phases[i]) * 10 * highJitter;
-                posAttr.array[i3+2] = baseZ + Math.sin(time * 0.5 + phases[i]) * 10 * highJitter;
+                posAttr.array[i3] = (baseX * pulseScale) + Math.sin(time + phases[i]) * 10 * highJitter;
+                posAttr.array[i3+1] = (baseY * pulseScale) + Math.cos(time + phases[i]) * 10 * highJitter;
+                posAttr.array[i3+2] = (baseZ * pulseScale) + Math.sin(time * 0.5 + phases[i]) * 10 * highJitter;
 
                 const densityMask = 1;
-                const lightness = 0.4 + (Math.sin(time + phases[i]) * 0.2) + audioLevel * 0.15 + bassLevel * 0.1;
-                const saturation = timeline.phase.saturation + (Math.cos(time * 0.5 + phases[i]) * 0.2);
-                colorTool.setHSL(baseHue, saturation, lightness);
+
+                // Delayed color wave (shoal-like): nearby particles shift together, farther ones lag.
+                const radius = Math.sqrt(baseX * baseX + baseY * baseY + baseZ * baseZ);
+                const colorDelay = radius * 0.01 + phases[i] * 0.6;
+                const colorWave = 0.5 + 0.5 * Math.sin(colorWavePhase - colorDelay);
+
+                let hue;
+                let saturation;
+                let lightness;
+                if (paletteMode === 'cyberpunk') {
+                    // Cyberpunk: hot pink -> electric orange -> acid yellow
+                    const hotPink = 0.91;
+                    const electricOrange = 0.08;
+                    const acidYellow = 0.15;
+                    hue = hotPink * (1 - colorWave) + electricOrange * colorWave;
+                    hue = hue * (1 - highLevel * 0.4) + acidYellow * (highLevel * 0.4);
+                    hue = ((hue + baseHue * 0.06) % 1 + 1) % 1;
+                    saturation = Math.min(1, Math.max(0, 0.92 + colorWave * 0.07 + highLevel * 0.08));
+                    lightness = Math.min(1, Math.max(0, 0.50 + colorWave * 0.10 + audioLevel * 0.09 + bassLevel * 0.03));
+                } else {
+                    // Reactor Core: deep crimson -> burnt orange -> gold
+                    const crimson = 0.98;
+                    const burntOrange = 0.06;
+                    const gold = 0.12;
+                    hue = crimson * (1 - colorWave) + burntOrange * colorWave;
+                    hue = hue * (1 - highLevel * 0.35) + gold * (highLevel * 0.35);
+                    hue = ((hue + baseHue * 0.05) % 1 + 1) % 1;
+                    saturation = Math.min(1, Math.max(0, 0.86 + colorWave * 0.10 + highLevel * 0.05));
+                    lightness = Math.min(1, Math.max(0, 0.42 + colorWave * 0.12 + audioLevel * 0.10 + bassLevel * 0.05));
+                }
+                colorTool.setHSL(hue, saturation, lightness);
 
                 colAttr.array[i3] = colorTool.r;
                 colAttr.array[i3+1] = colorTool.g;
@@ -687,6 +815,30 @@
             colAttr.needsUpdate = true;
 
             points.rotation.y += 0.001;
+
+            if (debugVisible) {
+                debugTick++;
+                if (debugTick % 5 === 0) {
+                    const debugPanel = document.getElementById('debug-panel');
+                    if (debugPanel) {
+                        const filePlaying = !!(audioElement && !audioElement.paused && !audioElement.ended);
+                        debugPanel.textContent =
+`AUDIO CORE (PHASE 1)
+audioEnabled: ${audioEnabled}
+filePlaying: ${filePlaying}
+palette: ${paletteMode}
+
+raw bands  b:${bassLevel.toFixed(3)} m:${midLevel.toFixed(3)} h:${highLevel.toFixed(3)}
+norm bands b:${audioFeatures.bassNorm.toFixed(3)} m:${audioFeatures.midNorm.toFixed(3)} h:${audioFeatures.highNorm.toFixed(3)}
+rms: ${audioFeatures.rms.toFixed(4)} onset: ${audioFeatures.onset.toFixed(4)}
+centroid: ${audioFeatures.centroid.toFixed(1)}Hz
+rolloff85: ${audioFeatures.rolloff.toFixed(1)}Hz
+autoGain: ${audioFeatures.autoGain.toFixed(3)}
+audioLevel: ${audioLevel.toFixed(3)}
+`;
+                    }
+                }
+            }
 
             renderer.render(scene, camera);
         }
