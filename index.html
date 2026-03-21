@@ -3,25 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nebula X - Morphing Shapes Edition</title>
+    <meta name="description" content="Nebula X — long-form audio-visual particles. Focus & sleep modes, envelope-driven audio, fixed camera. Open in a browser; mic or file audio optional.">
+    <meta name="theme-color" content="#000000">
+    <meta name="color-scheme" content="dark">
+    <title>Nebula X — Audio-visual instrument</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='8' fill='%230ff' opacity='0.85'/%3E%3C/svg%3E">
     <style>
         body { margin: 0; background-color: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; cursor: crosshair; }
-        
-        #ui { 
-            position: absolute; 
-            top: 50%; 
-            left: 50%; 
-            transform: translate(-50%, -50%);
-            color: white; 
-            text-align: center;
-            pointer-events: none; 
-            text-shadow: 0 0 40px rgba(255,255,255,0.5);
-            transition: opacity 3s ease;
-            z-index: 10;
-        }
-
-        #ui h1 { font-size: 3.5rem; font-weight: 100; letter-spacing: 20px; margin: 0; text-transform: uppercase; }
-        #ui p { font-size: 0.9rem; letter-spacing: 8px; opacity: 0.4; margin-top: 20px; }
 
         #controls {
             position: absolute;
@@ -70,11 +58,51 @@
         #control-panel input[type="file"] { font-size: 10px; margin-top: 4px; }
 
         canvas { display: block; filter: saturate(1.2) brightness(1.1); }
+
+        #help-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.88);
+            z-index: 100;
+            color: #e8e8e8;
+            padding: 28px 32px;
+            font-size: 12px;
+            line-height: 1.65;
+            overflow: auto;
+            max-width: 520px;
+            border-right: 1px solid #222;
+        }
+        #help-overlay.visible { display: block; }
+        #help-overlay h2 { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; margin: 0 0 14px; color: #0ff; }
+        #help-overlay ul { margin: 0; padding-left: 18px; }
+        #help-overlay kbd { background: #2a2a2a; padding: 2px 7px; border-radius: 4px; border: 1px solid #444; font-family: monospace; font-size: 11px; }
+        #help-overlay .hint { font-size: 10px; opacity: 0.5; margin-top: 16px; }
     </style>
 </head>
 <body>
+    <div id="help-overlay" aria-hidden="true">
+        <h2>Nebula X — keys</h2>
+        <p style="font-size:10px;opacity:0.55;margin:-6px 0 12px;letter-spacing:0.12em;">RELEASE · v6 · fixed camera · particles-only motion</p>
+        <ul>
+            <li>View stays still — <strong>particles</strong> move (no zoom / no camera orbit).</li>
+            <li><strong>Expression</strong> slider — shape + colour + flow strength (not “zoom”: whole-scene scale is fixed).</li>
+            <li>Two-layer render: sharp stars + soft <strong>halo</strong> that swells on bass/bloom (volume/light, not camera zoom).</li>
+            <li><kbd>F</kbd> Fullscreen</li>
+            <li><kbd>C</kbd> Clock</li>
+            <li><kbd>A</kbd> Audio bands on/off</li>
+            <li><kbd>P</kbd> Palette: spectrum → reactor → sleep</li>
+            <li><kbd>M</kbd> Mode: focus ↔ sleep</li>
+            <li><kbd>N</kbd> Narrative scenes</li>
+            <li><kbd>D</kbd> Debug telemetry</li>
+            <li><kbd>H</kbd> Hide HUD</li>
+            <li><kbd>R</kbd> Record / stop</li>
+            <li><kbd>?</kbd> or <kbd>Shift</kbd>+<kbd>/</kbd> This help · <kbd>Esc</kbd> Close</li>
+        </ul>
+        <p class="hint">Particle tier &amp; beast profile require reload when changed.</p>
+    </div>
     <div id="controls">
-        Scroll / Arrows = Zoom • Mouse = Warp / Gravity • F = Fullscreen • C = Clock • A = Audio Bands • P = Palette • D = Debug • H = Hide HUD • R = Record
+        Nebula X v6 · Mouse = warp / gravity · ? = help · F fullscreen · C clock · A audio · P palette · M mode · N narrative · D debug · H HUD · R record
     </div>
 
     <div id="clock" style="display: none;"></div>
@@ -91,10 +119,29 @@
         <input type="range" id="morphSpeed" min="0.3" max="2" step="0.1" value="1">
         <label>Color speed</label>
         <input type="range" id="colorSpeed" min="0.3" max="2" step="0.1" value="1">
-        <label>Camera / zoom</label>
-        <input type="range" id="cameraSpeed" min="0.3" max="2" step="0.1" value="1">
+        <label>Expression</label>
+        <input type="range" id="visualExpress" min="0.5" max="2" step="0.05" value="1" title="Shape change, spectral color, flow chaos, idle breath — main &quot;make it different&quot; control">
         <label>Flow / gravity</label>
         <input type="range" id="fieldStrength" min="0" max="1.5" step="0.05" value="0.6">
+        <label>Particle load (reload)</label>
+        <select id="particleTier">
+            <option value="lite">Lite 40k</option>
+            <option value="standard" selected>Standard 100k</option>
+            <option value="beast">Beast 200k</option>
+        </select>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+            <button type="button" id="btnSaveProfile" style="flex:1;margin-top:0;">Save profile</button>
+            <button type="button" id="btnLoadProfile" style="flex:1;margin-top:0;">Load profile</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;"><input type="checkbox" id="gpuParticles" style="width:auto;"> <span>GPU particles (§2 vertex shader)</span></label>
+        <div style="font-size:8px;opacity:0.45;margin:2px 0 6px;">Off = CPU sim (default). Check + reload for GPU path.</div>
+        <label>Creator pack (§9)</label>
+        <select id="creatorPack">
+            <option value="custom">Custom (sliders)</option>
+            <option value="sleep60">Sleep 60m</option>
+            <option value="study60">Study 60m</option>
+            <option value="dystopia60">Dystopia 60m</option>
+        </select>
         <div class="audio-row">
             <strong>Audio</strong>
             <br><button type="button" id="btnMic">Mic</button>
@@ -106,35 +153,85 @@
             <br><button type="button" id="btnRecord">Start</button>
             <button type="button" id="btnStopRecord" disabled>Stop</button>
             <div id="recordStatus" style="margin-top:4px; font-size:10px; opacity:0.7;">Idle</div>
+            <button type="button" id="btnExportLog" style="margin-top:8px;width:100%;">Export session log (JSON)</button>
+        </div>
+        <div id="mode-badge" style="margin-top:10px;padding:8px;border-radius:6px;border:1px solid #333;font-size:10px;line-height:1.35;">
+            <strong id="mode-title" style="letter-spacing:0.1em;">FOCUS</strong>
+            <div id="mode-desc" style="opacity:0.8;margin-top:4px;">Brighter, faster read — for active listening.</div>
+        </div>
+        <div id="telemetry-bars" style="margin-top:10px;">
+            <div style="font-size:9px;opacity:0.55;text-transform:uppercase;letter-spacing:0.06em;">Bloom (transient hit)</div>
+            <div style="height:7px;background:#1a1a1a;border-radius:3px;overflow:hidden;margin:3px 0 8px;border:1px solid #333;">
+                <div id="bar-bloom" style="height:100%;width:0%;background:linear-gradient(90deg,#0ff,#f0f);transition:width 0.08s linear;"></div>
+            </div>
+            <div style="font-size:9px;opacity:0.55;text-transform:uppercase;letter-spacing:0.06em;">Re-form (after hit)</div>
+            <div style="height:7px;background:#1a1a1a;border-radius:3px;overflow:hidden;border:1px solid #333;">
+                <div id="bar-reform" style="height:100%;width:0%;background:linear-gradient(90deg,#fa0,#f44);transition:width 0.12s linear;"></div>
+            </div>
+            <div style="font-size:8px;opacity:0.45;margin-top:6px;line-height:1.3;">Needs audio (mic/file). Press <strong>D</strong> for numbers.</div>
+            <div id="sparklines" style="margin-top:8px;" title="§3.3 trailing history (48 samples)">
+                <div style="font-size:8px;opacity:0.5;text-transform:uppercase;letter-spacing:0.06em;">Sparklines</div>
+                <canvas id="spark-bass" width="180" height="22" style="display:block;background:#111;border-radius:4px;margin-top:3px;border:1px solid #222;"></canvas>
+                <canvas id="spark-mid" width="180" height="22" style="display:block;margin-top:3px;background:#111;border-radius:4px;border:1px solid #222;"></canvas>
+                <canvas id="spark-flat" width="180" height="22" style="display:block;margin-top:3px;background:#111;border-radius:4px;border:1px solid #222;"></canvas>
+            </div>
+        </div>
+        <div id="narrative-panel" style="margin-top:10px;padding:8px;border-radius:6px;border:1px solid #2a4a3a;font-size:10px;line-height:1.35;">
+            <div style="font-size:9px;opacity:0.55;text-transform:uppercase;letter-spacing:0.06em;">Narrative (§7)</div>
+            <strong id="narrative-title" style="letter-spacing:0.06em;color:#9fd;">The Void</strong>
+            <div id="narrative-sub" style="opacity:0.75;margin-top:3px;font-size:9px;">Hold</div>
+            <div style="height:5px;background:#111;border-radius:3px;overflow:hidden;margin-top:6px;border:1px solid #333;">
+                <div id="narrative-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#084,#0af);"></div>
+            </div>
+            <div id="narrative-hint" style="font-size:8px;opacity:0.45;margin-top:5px;"><strong>N</strong> toggles long-form scenes (≥30s crossfades).</div>
         </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/nebula-namespace.js"></script>
+    <script src="js/audio-core.js"></script>
+    <script src="js/stability-monitor.js"></script>
+    <script src="js/creator-presets.js"></script>
+    <script src="js/user-profile.js"></script>
+    <script src="js/render-core.js"></script>
+    <script src="js/simulation-core.js"></script>
+    <script src="js/gpu-points-material.js"></script>
     <script>
         const STORAGE_CLOCK = 'nebula-x-clock-visible';
         const STORAGE_HUD = 'nebula-x-hud-visible';
+        const STORAGE_NARRATIVE = 'nebula-x-narrative-enabled';
+        /** Blueprint §6.2: same starting palette phase for the whole tab session (channel consistency). */
+        const STORAGE_PALETTE_LOCK_IDX = 'nebula-x-palette-lock-idx';
+        const STORAGE_GPU_PARTICLES = 'nebula-x-gpu-particles';
+        const STORAGE_PARTICLE_TIER = 'nebula-x-particle-tier';
+        const TIER_COUNTS = { lite: 40000, standard: 100000, beast: 200000 };
 
-        let scene, camera, renderer, points, geometry;
+        function getParticleCountFromTier() {
+            const t = localStorage.getItem(STORAGE_PARTICLE_TIER) || 'standard';
+            return TIER_COUNTS[t] || TIER_COUNTS.standard;
+        }
+
+        let scene, camera, renderer, points, pointsGlow, geometry, pointsMaterial, glowMaterial;
+        const fogColorCurrent = new THREE.Color(0x000000);
+        const fogTargetScratch = new THREE.Color();
         let positions, cloudPos, ringPos, spherePos, colors, sizes, phases;
-        const particleCount = 100000;
+        let particleCount = getParticleCountFromTier();
 
         let time = 0;
-        let visualTime = 0;
         // HUD = overlays (bottom instructions + control panel). Center title removed entirely.
         let hudVisible = true;
         let clockVisible = false;
         let mouse = { x: 0, y: 0 };
         let targetMouse = { x: 0, y: 0 };
 
-        let zoomDistance = 1000;
-        let targetZoom = 1000;
-        const minZoom = 100;
-        const maxZoom = 2500;
+        /** Fixed camera distance — no scroll/keyboard zoom. */
+        const CAMERA_DISTANCE = 1000;
 
         let params = {
             morphSpeed: 1,
             colorSpeed: 1,
-            cameraSpeed: 1,
+            /** 0.5 = calm / minimal · 2 = dramatic — drives morph speed, MIR→color, flow chaos, breath */
+            visualExpress: 1,
             flowStrength: 0.6,
             gravityStrength: 0.6
         };
@@ -148,7 +245,49 @@
         let audioSmoothing = 0.15;
         let audioSource = null;
         let audioElement = null;
-        let paletteMode = 'cyberpunk'; // 'cyberpunk' | 'reactor'
+        let micStream = null;
+        let audioFileObjectUrl = null;
+        let paletteMode = 'spectrum'; // 'spectrum' | 'reactor' | 'sleep'
+        let experienceMode = 'focus'; // 'focus' | 'sleep'
+        /** Fixed cadence: equal time per segment (blueprint: long-form arcs, no random dwell). */
+        const PALETTE_SEGMENT_SEC = 20;
+        /** §6.2: multiply segment length for minute-scale palette arcs (smooth lerp, slower index advance). */
+        const PALETTE_ARC_MULT = 3;
+        let paletteSegmentIndex = 0;
+        let paletteSegmentElapsed = 0;
+        let particleSizeSmoothed = 4.5;
+        /** Session seed so motion/colour paths are not identical every reload (blueprint §4.1). */
+        let sessionSeed = 0;
+        let flowTimeOffset = 0;
+        let morphPhaseOffset = 0;
+        let cameraPhaseOffset = 0;
+        let colorWaveOffset = 0;
+        let lastFrameWallMs = 0;
+        let lastIdleFrameMs = -Infinity;
+        let visualWallTime = 0;
+
+        /** Blueprint §7 — four scenes, ≥30s crossfades, uniform blend only (no hard cuts). */
+        const NARRATIVE_SCENES = [
+            { key: 'void', name: 'The Void', holdSec: 120, crossfadeSec: 36,
+                fogColor: 0x020206, fogDensity: 0.00044, hueShift: 0.0,
+                morphRingBias: 0.1, morphSphereBias: -0.05, flowMul: 0.84, bloomKMul: 0.76, camMul: 0.74, satAdd: -0.06, lightAdd: -0.06 },
+            { key: 'current', name: 'The Current', holdSec: 120, crossfadeSec: 36,
+                fogColor: 0x061a22, fogDensity: 0.0006, hueShift: 0.14,
+                morphRingBias: 0.42, morphSphereBias: 0.08, flowMul: 1.12, bloomKMul: 1.1, camMul: 1.02, satAdd: 0.04, lightAdd: 0.05 },
+            { key: 'ember', name: 'The Ember', holdSec: 120, crossfadeSec: 36,
+                fogColor: 0x160606, fogDensity: 0.00074, hueShift: 0.03,
+                morphRingBias: 0.2, morphSphereBias: 0.12, flowMul: 0.94, bloomKMul: 1.16, camMul: 0.9, satAdd: 0.08, lightAdd: -0.03 },
+            { key: 'aurora', name: 'The Aurora', holdSec: 120, crossfadeSec: 36,
+                fogColor: 0x030c14, fogDensity: 0.00052, hueShift: 0.48,
+                morphRingBias: 0.48, morphSphereBias: 0.22, flowMul: 1.06, bloomKMul: 1.0, camMul: 1.14, satAdd: 0.05, lightAdd: 0.08 }
+        ];
+        const NARRATIVE_BLEND_INTO_MODE = 0.58;
+        let narrativeEnabled = true;
+        let narrativeTime = 0;
+        let narrativeTimeline = { segments: [], total: 1 };
+        const narrColorA = new THREE.Color();
+        const narrColorB = new THREE.Color();
+        const narrColorOut = new THREE.Color();
 
         let audioMixDestination = null;
         let recorder = null;
@@ -160,8 +299,17 @@
         let bassImpulse = 0;
         let pulseEnergy = 0;
         let timeDomainData = null;
+        /** Blueprint §2.1: reuse FFT bins — no per-frame allocation. */
+        let fftByteFrequency = null;
         let debugVisible = false;
         let debugTick = 0;
+        let helpOverlayVisible = false;
+        let sparkBass = null;
+        let sparkMid = null;
+        let sparkFlat = null;
+        let healthTracker = null;
+        /** Blueprint §2: GPU vertex shader path (opt-in; CPU is default — more reliable). */
+        let gpuParticleMode = false;
 
         const audioFeatures = {
             rms: 0,
@@ -171,7 +319,16 @@
             bassNorm: 0,
             midNorm: 0,
             highNorm: 0,
-            autoGain: 1
+            autoGain: 1,
+            /** §4.2 transient bloom (fast attack / release-shaped) */
+            bloomEnv: 0,
+            /** §4.2 post-hit re-form magnet strength */
+            reformMagnet: 0,
+            flatness: 0,
+            spread: 0,
+            healthSilent: false,
+            healthClip: false,
+            healthStuck: false
         };
         const audioFeatureEnv = {
             rms: 0,
@@ -184,161 +341,390 @@
         const PHI = 1.618033988749895;
 
         const PRESETS = {
-            calm:   { morphSpeed: 0.5, colorSpeed: 0.5, cameraSpeed: 0.5 },
-            intense: { morphSpeed: 1.5, colorSpeed: 1.5, cameraSpeed: 1.2 },
-            slow:   { morphSpeed: 0.35, colorSpeed: 0.35, cameraSpeed: 0.4 }
+            calm:   { morphSpeed: 0.5, colorSpeed: 0.5, visualExpress: 0.72 },
+            intense: { morphSpeed: 1.5, colorSpeed: 1.5, visualExpress: 1.55 },
+            slow:   { morphSpeed: 0.35, colorSpeed: 0.35, visualExpress: 0.65 }
         };
 
-        const timelinePhases = [
-            { duration: 600, density: 0.4, saturation: 0.5, zoomFactor: 0.8 },
-            { duration: 600, density: 0.7, saturation: 0.7, zoomFactor: 1.0 },
-            { duration: 900, density: 1.0, saturation: 0.9, zoomFactor: 1.2 }
+        /** Blueprint §3.2 + §5: dual-timescale smoothing + per-mode motion caps + LOOK (must read at a glance). */
+        const MODE_PROFILES = {
+            focus: {
+                flowScale: 1.0,
+                shimmerScale: 1.0,
+                pulseScale: 1.0,
+                lightnessBoost: 0.06,
+                saturationBoost: 0.06,
+                /** §5.1 Cooler micro-highlight on treble (readability / “study” clarity). */
+                highlightHueShift: 0.028,
+                detailCadence: 1.12,
+                velocityVariance: 1.0,
+                pulseReadScale: 1.08,
+                bassSlow: 0.055,
+                midSlow: 0.045,
+                highSlow: 0.07,
+                bloomAttack: 0.48,
+                bloomRelease: 0.09,
+                reformRate: 0.11,
+                onsetDampPad: 1.0,
+                maxStrayFromTarget: 280,
+                maxBloomPush: 42,
+                maxShimmerUnits: 11,
+                fogColor: 0x060818,
+                fogDensity: 0.00052,
+                canvasFilter: 'saturate(1.25) brightness(1.12)',
+                bloomRadialK: 0.72,
+                globalPointScale: 1.0,
+                title: 'FOCUS',
+                blurb: 'Brighter, cooler highlights — detail cadence up for active listening.'
+            },
+            sleep: {
+                flowScale: 0.42,
+                shimmerScale: 0.22,
+                pulseScale: 0.38,
+                lightnessBoost: -0.12,
+                saturationBoost: -0.20,
+                /** §5.2 Warm bias on highs; lower velocity variance. */
+                highlightHueShift: -0.02,
+                detailCadence: 0.65,
+                velocityVariance: 0.48,
+                pulseReadScale: 0.72,
+                bassSlow: 0.028,
+                midSlow: 0.022,
+                highSlow: 0.035,
+                bloomAttack: 0.22,
+                bloomRelease: 0.038,
+                reformRate: 0.048,
+                onsetDampPad: 2.2,
+                maxStrayFromTarget: 180,
+                maxBloomPush: 24,
+                maxShimmerUnits: 6,
+                fogColor: 0x120505,
+                fogDensity: 0.00078,
+                canvasFilter: 'saturate(0.82) brightness(0.88)',
+                bloomRadialK: 0.42,
+                globalPointScale: 0.88,
+                title: 'SLEEP',
+                blurb: 'Circadian-warm palette bias, low variance — deep calm / overnight.'
+            }
+        };
+
+        /**
+         * Ordered spectrum: purple / blue / cyan / green / yellow / orange / red / magenta / white (neutral).
+         * Each segment lasts PALETTE_SEGMENT_SEC; we lerp hue (or white blend) smoothly across the segment.
+         */
+        const PALETTE_SPECTRUM_SEGMENTS = [
+            { h: 0.78, white: 0 }, // purple
+            { h: 0.58, white: 0 }, // blue
+            { h: 0.48, white: 0 }, // cyan
+            { h: 0.33, white: 0 }, // green
+            { h: 0.15, white: 0 }, // yellow
+            { h: 0.08, white: 0 }, // orange
+            { h: 0.02, white: 0 }, // red
+            { h: 0.92, white: 0 }, // magenta / hot pink
+            { h: 0.78, white: 1 }  // white (high-key neutral; hue unused when white=1)
+        ];
+        /** Reactor: deep crimson → burnt orange → gold (ordered, equal segment time). */
+        const PALETTE_REACTOR_SEGMENTS = [
+            { h: 0.98, white: 0 },
+            { h: 0.04, white: 0 },
+            { h: 0.08, white: 0 },
+            { h: 0.12, white: 0 },
+            { h: 0.16, white: 0 },
+            { h: 0.78, white: 0.35 } // slight white lift (ember highlight), not full white
+        ];
+        /** §6.1 Sleep-safe warm set: amber / ember / red weighted (low blue for night viewing). */
+        const PALETTE_SLEEP_SEGMENTS = [
+            { h: 0.085, white: 0.08 },
+            { h: 0.06, white: 0 },
+            { h: 0.04, white: 0 },
+            { h: 0.02, white: 0 },
+            { h: 0.075, white: 0.12 },
+            { h: 0.11, white: 0.18 }
         ];
 
-        function getTimelineState(dt) {
-            visualTime += dt;
-            let t = visualTime;
-            let current = timelinePhases[0];
-            for (let i = 0; i < timelinePhases.length; i++) {
-                const ph = timelinePhases[i];
-                if (t <= ph.duration) {
-                    current = ph;
-                    break;
-                }
-                t -= ph.duration;
-                if (i === timelinePhases.length - 1) current = ph;
-            }
-            let acc = 0;
-            for (let i = 0; i < timelinePhases.length; i++) acc += timelinePhases[i].duration;
-            const cycleT = visualTime % acc;
-            let macroZoom = 1;
-            let zt = cycleT / acc;
-            if (zt < 0.5) macroZoom = 0.8 + 0.6 * (zt / 0.5);
-            else macroZoom = 1.4 - 0.4 * ((zt - 0.5) / 0.5);
-            return { phase: current, macroZoom };
+        function getPaletteSegments(mode) {
+            if (mode === 'reactor') return PALETTE_REACTOR_SEGMENTS;
+            if (mode === 'sleep') return PALETTE_SLEEP_SEGMENTS;
+            return PALETTE_SPECTRUM_SEGMENTS;
         }
 
-        function createStarTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64;
-            canvas.height = 64;
-            const context = canvas.getContext('2d');
-            const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
-            gradient.addColorStop(0, 'rgba(255,255,255,1)');
-            gradient.addColorStop(0.2, 'rgba(255,255,255,0.8)');
-            gradient.addColorStop(0.5, 'rgba(255,255,255,0.2)');
-            gradient.addColorStop(1, 'rgba(255,255,255,0)');
-            context.fillStyle = gradient;
-            context.fillRect(0, 0, 64, 64);
-            return new THREE.CanvasTexture(canvas);
+        /** Shortest-path hue interpolation in [0,1). */
+        function hueShortestLerp(a, b, t) {
+            let d = b - a;
+            if (d > 0.5) d -= 1;
+            if (d < -0.5) d += 1;
+            const h = a + d * t;
+            return ((h % 1) + 1) % 1;
+        }
+
+        function buildNarrativeTimeline() {
+            const segments = [];
+            let t = 0;
+            const n = NARRATIVE_SCENES.length;
+            for (let i = 0; i < n; i++) {
+                const s = NARRATIVE_SCENES[i];
+                segments.push({ kind: 'hold', idx: i, t0: t, t1: t + s.holdSec });
+                t += s.holdSec;
+                const cf = Math.max(30, s.crossfadeSec);
+                const next = (i + 1) % n;
+                segments.push({ kind: 'fade', from: i, to: next, t0: t, t1: t + cf });
+                t += cf;
+            }
+            return { segments, total: Math.max(1, t) };
+        }
+
+        function smoothstep01(x) {
+            const t = Math.min(1, Math.max(0, x));
+            return t * t * (3 - 2 * t);
+        }
+
+        /** Returns blended narrative uniforms + UI fields. */
+        function sampleNarrative(tt) {
+            const T = narrativeTimeline.total;
+            const t = ((tt % T) + T) % T;
+            const segs = narrativeTimeline.segments;
+            for (let i = 0; i < segs.length; i++) {
+                const seg = segs[i];
+                if (t >= seg.t0 && t < seg.t1) {
+                    if (seg.kind === 'hold') {
+                        const a = NARRATIVE_SCENES[seg.idx];
+                        return {
+                            u: a,
+                            sub: 'Hold',
+                            progress: (t - seg.t0) / (seg.t1 - seg.t0),
+                            fadeT: 0
+                        };
+                    }
+                    const a = NARRATIVE_SCENES[seg.from];
+                    const b = NARRATIVE_SCENES[seg.to];
+                    const fadeT = (t - seg.t0) / (seg.t1 - seg.t0);
+                    const w = smoothstep01(fadeT);
+                    return {
+                        u: lerpNarrativeUniforms(a, b, w),
+                        sub: `Crossfade → ${b.name}`,
+                        progress: (t - seg.t0) / (seg.t1 - seg.t0),
+                        fadeT: w
+                    };
+                }
+            }
+            const a = NARRATIVE_SCENES[0];
+            return { u: a, sub: 'Hold', progress: 0, fadeT: 0 };
+        }
+
+        function lerpNarrativeUniforms(a, b, w) {
+            narrColorA.setHex(a.fogColor);
+            narrColorB.setHex(b.fogColor);
+            narrColorOut.copy(narrColorA).lerp(narrColorB, w);
+            return {
+                name: w < 0.5 ? a.name : b.name,
+                fogColor: narrColorOut.getHex(),
+                fogDensity: a.fogDensity + (b.fogDensity - a.fogDensity) * w,
+                hueShift: a.hueShift + (b.hueShift - a.hueShift) * w,
+                morphRingBias: a.morphRingBias + (b.morphRingBias - a.morphRingBias) * w,
+                morphSphereBias: a.morphSphereBias + (b.morphSphereBias - a.morphSphereBias) * w,
+                flowMul: a.flowMul + (b.flowMul - a.flowMul) * w,
+                bloomKMul: a.bloomKMul + (b.bloomKMul - a.bloomKMul) * w,
+                camMul: a.camMul + (b.camMul - a.camMul) * w,
+                satAdd: a.satAdd + (b.satAdd - a.satAdd) * w,
+                lightAdd: a.lightAdd + (b.lightAdd - a.lightAdd) * w
+            };
+        }
+
+        /** Blueprint §8: release mic, element source, and blob URLs. */
+        function disposeAudioResources() {
+            if (micStream) {
+                try {
+                    micStream.getTracks().forEach((t) => t.stop());
+                } catch (_) {}
+                micStream = null;
+            }
+            if (audioSource) {
+                try {
+                    audioSource.disconnect();
+                } catch (_) {}
+                audioSource = null;
+            }
+            if (audioElement) {
+                try {
+                    audioElement.pause();
+                } catch (_) {}
+                try {
+                    audioElement.src = '';
+                } catch (_) {}
+                audioElement = null;
+            }
+            if (audioFileObjectUrl) {
+                try {
+                    URL.revokeObjectURL(audioFileObjectUrl);
+                } catch (_) {}
+                audioFileObjectUrl = null;
+            }
+            if (audioCtx && audioCtx.state !== 'closed') {
+                try {
+                    audioCtx.suspend();
+                } catch (_) {}
+            }
         }
 
         function init() {
             hudVisible = localStorage.getItem(STORAGE_HUD) !== 'false';
             clockVisible = localStorage.getItem(STORAGE_CLOCK) === 'true';
+            narrativeEnabled = localStorage.getItem(STORAGE_NARRATIVE) !== 'false';
+            try {
+                const pr = sessionStorage.getItem('nebula-x-profile-apply');
+                if (pr) {
+                    sessionStorage.removeItem('nebula-x-profile-apply');
+                    const p = JSON.parse(pr);
+                    if (p.params) Object.assign(params, p.params);
+                    if (p.experienceMode) experienceMode = p.experienceMode;
+                    if (p.paletteMode) paletteMode = p.paletteMode;
+                    if (typeof p.narrativeEnabled === 'boolean') {
+                        narrativeEnabled = p.narrativeEnabled;
+                        localStorage.setItem(STORAGE_NARRATIVE, String(narrativeEnabled));
+                    }
+                    if (p.preset) {
+                        const pe = document.getElementById('preset');
+                        if (pe && PRESETS[p.preset]) pe.value = p.preset;
+                    }
+                }
+            } catch (_) {}
+            narrativeTimeline = buildNarrativeTimeline();
+            narrativeTime = Math.random() * Math.min(30, narrativeTimeline.total * 0.1);
+            sessionSeed = Math.random() * 100000;
+            flowTimeOffset = sessionSeed * 0.001;
+            morphPhaseOffset = Math.random() * Math.PI * 2;
+            cameraPhaseOffset = Math.random() * Math.PI * 2;
+            colorWaveOffset = Math.random() * Math.PI * 2;
+            const segs = getPaletteSegments(paletteMode);
+            try {
+                const raw = sessionStorage.getItem(STORAGE_PALETTE_LOCK_IDX);
+                if (raw == null || raw === '') {
+                    paletteSegmentIndex = Math.floor(Math.random() * segs.length);
+                    sessionStorage.setItem(STORAGE_PALETTE_LOCK_IDX, String(paletteSegmentIndex));
+                } else {
+                    const idx = parseInt(raw, 10);
+                    paletteSegmentIndex = Number.isFinite(idx) ? ((idx % segs.length) + segs.length) % segs.length : 0;
+                }
+            } catch (_) {
+                paletteSegmentIndex = Math.floor(Math.random() * segs.length);
+            }
+            paletteSegmentElapsed = Math.random() * PALETTE_SEGMENT_SEC * PALETTE_ARC_MULT * 0.5;
 
-            scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x000000, 0.0006);
+            if (!window.NebulaX || !NebulaX.RenderCore) {
+                console.error('NebulaX.RenderCore missing — load js/render-core.js');
+                return;
+            }
+            const rc = NebulaX.RenderCore.initParticleScene(THREE, {
+                particleCount,
+                initialFogHex: MODE_PROFILES.focus.fogColor,
+                initialFogDensity: MODE_PROFILES.focus.fogDensity,
+                cameraDistance: CAMERA_DISTANCE,
+                width: window.innerWidth,
+                height: window.innerHeight,
+                container: document.body
+            });
+            scene = rc.scene;
+            camera = rc.camera;
+            renderer = rc.renderer;
+            geometry = rc.geometry;
+            points = rc.points;
+            pointsGlow = rc.pointsGlow;
+            pointsMaterial = rc.pointsMaterial;
+            glowMaterial = rc.glowMaterial;
+            positions = rc.positions;
+            cloudPos = rc.cloudPos;
+            ringPos = rc.ringPos;
+            spherePos = rc.spherePos;
+            colors = rc.colors;
+            sizes = rc.sizes;
+            phases = rc.phases;
+            fogColorCurrent.copy(rc.initialFogColor);
 
-            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 6000);
-            camera.position.z = zoomDistance;
-
-            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            document.body.appendChild(renderer.domElement);
-
-            geometry = new THREE.BufferGeometry();
-            positions = new Float32Array(particleCount * 3);
-            cloudPos = new Float32Array(particleCount * 3);
-            ringPos = new Float32Array(particleCount * 3);
-            spherePos = new Float32Array(particleCount * 3);
-            colors = new Float32Array(particleCount * 3);
-            sizes = new Float32Array(particleCount);
-            phases = new Float32Array(particleCount);
-
-            for (let i = 0; i < particleCount; i++) {
-                const i3 = i * 3;
-
-                cloudPos[i3] = (Math.random() - 0.5) * 2000;
-                cloudPos[i3 + 1] = (Math.random() - 0.5) * 2000;
-                cloudPos[i3 + 2] = (Math.random() - 0.5) * 2000;
-
-                const angle = Math.random() * Math.PI * 2;
-                const radius = 600 + (Math.random() - 0.5) * 200;
-                ringPos[i3] = Math.cos(angle) * radius;
-                ringPos[i3 + 1] = (Math.random() - 0.5) * 100;
-                ringPos[i3 + 2] = Math.sin(angle) * radius;
-
-                const u = Math.random();
-                const v = Math.random();
-                const thetaS = 2 * Math.PI * u;
-                const phiS = Math.acos(2 * v - 1);
-                const rS = 400 * Math.pow(Math.random(), 1/3);
-                spherePos[i3] = rS * Math.sin(phiS) * Math.cos(thetaS);
-                spherePos[i3 + 1] = rS * Math.sin(phiS) * Math.sin(thetaS);
-                spherePos[i3 + 2] = rS * Math.cos(phiS);
-
-                positions[i3] = cloudPos[i3];
-                positions[i3+1] = cloudPos[i3+1];
-                positions[i3+2] = cloudPos[i3+2];
-
-                // Default all particles to white so they are clearly visible
-                colors[i3] = 1;
-                colors[i3 + 1] = 1;
-                colors[i3 + 2] = 1;
-
-                sizes[i] = 1.0 + Math.random() * 3.5;
-                phases[i] = Math.random() * Math.PI * 2;
+            if (window.NebulaX && NebulaX.StabilityMonitor) {
+                NebulaX.StabilityMonitor.init(renderer, renderer.domElement);
+            }
+            if (window.NebulaX && NebulaX.AudioCore) {
+                sparkBass = NebulaX.AudioCore.createSparklineBuffer(48);
+                sparkMid = NebulaX.AudioCore.createSparklineBuffer(48);
+                sparkFlat = NebulaX.AudioCore.createSparklineBuffer(48);
+                healthTracker = NebulaX.AudioCore.createHealthTracker();
             }
 
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+            particleSizeSmoothed = 4.5;
 
-            const material = new THREE.PointsMaterial({
-                size: 4.5,
-                map: createStarTexture(),
-                vertexColors: true,
-                transparent: true,
-                opacity: 0.9,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false,
-                sizeAttenuation: true
-            });
+            gpuParticleMode = localStorage.getItem(STORAGE_GPU_PARTICLES) === 'true';
+            const elGpu = document.getElementById('gpuParticles');
+            if (elGpu) elGpu.checked = gpuParticleMode;
 
-            points = new THREE.Points(geometry, material);
-            scene.add(points);
+            if (gpuParticleMode && window.NebulaX && NebulaX.GpuPointsMaterial) {
+                const tex = pointsMaterial.map;
+                const gm = NebulaX.GpuPointsMaterial.createGpuPointsMaterial(THREE, tex);
+                if (gm) {
+                    pointsMaterial.map = null;
+                    pointsMaterial.dispose();
+                    pointsMaterial = gm;
+                    points.material = pointsMaterial;
+                } else {
+                    gpuParticleMode = false;
+                    localStorage.setItem(STORAGE_GPU_PARTICLES, 'false');
+                    if (elGpu) elGpu.checked = false;
+                    setRecordStatus('GPU particles: shader failed — using CPU sim');
+                }
+            } else {
+                gpuParticleMode = false;
+                if (elGpu) elGpu.checked = false;
+            }
+
+            if (elGpu) {
+                elGpu.addEventListener('change', (e) => {
+                    localStorage.setItem(STORAGE_GPU_PARTICLES, e.target.checked ? 'true' : 'false');
+                    location.reload();
+                });
+            }
 
             window.addEventListener('mousemove', (e) => {
                 targetMouse.x = (e.clientX / window.innerWidth - 0.5) * 300;
                 targetMouse.y = (e.clientY / window.innerHeight - 0.5) * 300;
             });
 
-            window.addEventListener('wheel', (e) => {
-                targetZoom += e.deltaY * 0.5;
-                targetZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
-            }, { passive: true });
-
             window.addEventListener('keydown', (e) => {
-                if (e.key === 'ArrowUp') targetZoom -= 100;
-                else if (e.key === 'ArrowDown') targetZoom += 100;
-                targetZoom = Math.max(minZoom, Math.min(maxZoom, targetZoom));
                 if (e.key === 'f' || e.key === 'F') toggleFullscreen();
                 if (e.key === 'c' || e.key === 'C') toggleClock();
                 if (e.key === 'a' || e.key === 'A') toggleAudio();
                 if (e.key === 'h' || e.key === 'H') toggleHUD();
                 if (e.key === 'p' || e.key === 'P') {
-                    paletteMode = paletteMode === 'cyberpunk' ? 'reactor' : 'cyberpunk';
+                    paletteMode = paletteMode === 'spectrum' ? 'reactor' : paletteMode === 'reactor' ? 'sleep' : 'spectrum';
+                    const plen = getPaletteSegments(paletteMode).length;
+                    paletteSegmentIndex = paletteSegmentIndex % plen;
+                    paletteSegmentElapsed = 0;
                     setRecordStatus(`Palette: ${paletteMode}`);
                 }
                 if (e.key === 'd' || e.key === 'D') {
                     debugVisible = !debugVisible;
                     document.getElementById('debug-panel').style.display = debugVisible ? 'block' : 'none';
                 }
+                if (e.key === 'm' || e.key === 'M') {
+                    experienceMode = experienceMode === 'focus' ? 'sleep' : 'focus';
+                    setRecordStatus(`Mode: ${experienceMode}`);
+                    syncModeUI();
+                }
+                if (e.key === 'n' || e.key === 'N') {
+                    narrativeEnabled = !narrativeEnabled;
+                    localStorage.setItem(STORAGE_NARRATIVE, String(narrativeEnabled));
+                    setRecordStatus(narrativeEnabled ? 'Narrative: ON' : 'Narrative: OFF');
+                    syncNarrativeUI();
+                }
                 if (e.key === 'r' || e.key === 'R') {
                     if (recorder && recorder.state === 'recording') stopRecording();
                     else startRecording();
+                }
+                if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+                    e.preventDefault();
+                    toggleHelpOverlay();
+                }
+                if (e.key === 'Escape' && helpOverlayVisible) {
+                    e.preventDefault();
+                    toggleHelpOverlay();
                 }
             });
 
@@ -352,7 +738,8 @@
             document.getElementById('preset').addEventListener('change', applyPreset);
             document.getElementById('morphSpeed').addEventListener('input', (e) => { params.morphSpeed = +e.target.value; });
             document.getElementById('colorSpeed').addEventListener('input', (e) => { params.colorSpeed = +e.target.value; });
-            document.getElementById('cameraSpeed').addEventListener('input', (e) => { params.cameraSpeed = +e.target.value; });
+            const veEl = document.getElementById('visualExpress');
+            if (veEl) veEl.addEventListener('input', (e) => { params.visualExpress = +e.target.value; });
             document.getElementById('fieldStrength').addEventListener('input', (e) => {
                 const v = +e.target.value;
                 params.flowStrength = v;
@@ -363,9 +750,89 @@
             document.getElementById('audioFile').addEventListener('change', enableFile);
             document.getElementById('btnRecord').addEventListener('click', startRecording);
             document.getElementById('btnStopRecord').addEventListener('click', stopRecording);
+            document.getElementById('creatorPack').addEventListener('change', applyCreatorPack);
+            const elTier = document.getElementById('particleTier');
+            if (elTier) {
+                elTier.value = localStorage.getItem(STORAGE_PARTICLE_TIER) || 'standard';
+                elTier.addEventListener('change', (e) => {
+                    localStorage.setItem(STORAGE_PARTICLE_TIER, e.target.value);
+                    location.reload();
+                });
+            }
+            document.getElementById('btnSaveProfile').addEventListener('click', saveBeastProfile);
+            document.getElementById('btnLoadProfile').addEventListener('click', loadBeastProfile);
+            document.getElementById('btnExportLog').addEventListener('click', () => {
+                if (!window.NebulaX || !NebulaX.CreatorPresets) return;
+                const log = NebulaX.CreatorPresets.readLog();
+                const blob = new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `nebula-x-session-log-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 2000);
+                setRecordStatus(`Exported ${log.length} session entr${log.length === 1 ? 'y' : 'ies'}.`);
+            });
+
+            syncModeUI();
+            syncNarrativeUI();
+            syncSlidersFromParams();
+
+            const helpEl = document.getElementById('help-overlay');
+            if (helpEl) {
+                helpEl.addEventListener('click', (e) => {
+                    if (e.target === helpEl) toggleHelpOverlay();
+                });
+            }
+
+            window.addEventListener('beforeunload', () => {
+                disposeAudioResources();
+                if (window.NebulaX && NebulaX.RenderCore) {
+                    NebulaX.RenderCore.disposeParticleResources(geometry, pointsMaterial, glowMaterial);
+                }
+            });
 
             animate();
             if (clockVisible) updateClock();
+        }
+
+        function syncModeUI() {
+            const mp = MODE_PROFILES[experienceMode];
+            const elT = document.getElementById('mode-title');
+            const elD = document.getElementById('mode-desc');
+            if (elT) elT.textContent = mp.title;
+            if (elD) elD.textContent = mp.blurb;
+        }
+
+        function applyCreatorPack() {
+            const sel = document.getElementById('creatorPack');
+            if (!sel || sel.value === 'custom' || !window.NebulaX || !NebulaX.CreatorPresets) return;
+            const p = NebulaX.CreatorPresets.list[sel.value];
+            if (!p) return;
+            experienceMode = p.experienceMode;
+            paletteMode = p.paletteMode;
+            narrativeEnabled = p.narrativeEnabled;
+            localStorage.setItem(STORAGE_NARRATIVE, String(narrativeEnabled));
+            Object.assign(params, p.params);
+            document.getElementById('morphSpeed').value = params.morphSpeed;
+            document.getElementById('colorSpeed').value = params.colorSpeed;
+            const vePack = document.getElementById('visualExpress');
+            if (vePack) vePack.value = params.visualExpress != null ? params.visualExpress : 1;
+            document.getElementById('fieldStrength').value = params.flowStrength;
+            syncModeUI();
+            syncNarrativeUI();
+            setRecordStatus(`Pack: ${p.label}`);
+        }
+
+        function syncNarrativeUI() {
+            const panel = document.getElementById('narrative-panel');
+            if (panel) panel.style.opacity = narrativeEnabled ? '1' : '0.45';
+            const hint = document.getElementById('narrative-hint');
+            if (hint) hint.innerHTML = narrativeEnabled
+                ? '<strong>N</strong> toggles long-form scenes (≥30s crossfades).'
+                : '<strong>Narrative OFF</strong> — press <strong>N</strong> to enable.';
         }
 
         function toggleHUD() {
@@ -398,7 +865,9 @@
         function toggleAudio() {
             audioEnabled = !audioEnabled;
             document.getElementById('btnMic').classList.toggle('active', audioEnabled);
-            if (!audioEnabled && audioCtx && audioSource) { try { audioSource.disconnect(); } catch (_) {} }
+            if (!audioEnabled) {
+                disposeAudioResources();
+            }
             audioLevel = 0;
             setRecordStatus(audioEnabled ? 'Audio bands: ON' : 'Audio bands: OFF');
         }
@@ -406,6 +875,9 @@
         function ensureAudioGraph() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(() => {});
             }
             if (!analyser) {
                 analyser = audioCtx.createAnalyser();
@@ -424,6 +896,18 @@
             if (audioEnabled && analyser) { toggleAudio(); return; }
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
                 ensureAudioGraph();
+                if (audioElement) {
+                    try { audioElement.pause(); } catch (_) {}
+                    audioElement = null;
+                }
+                if (audioFileObjectUrl) {
+                    try { URL.revokeObjectURL(audioFileObjectUrl); } catch (_) {}
+                    audioFileObjectUrl = null;
+                }
+                if (micStream) {
+                    try { micStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+                }
+                micStream = stream;
                 if (audioSource) try { audioSource.disconnect(); } catch (_) {}
                 audioSource = audioCtx.createMediaStreamSource(stream);
                 audioSource.connect(analyser);
@@ -435,7 +919,16 @@
         function enableFile(e) {
             const file = e.target.files[0];
             if (!file) return;
+            if (micStream) {
+                try { micStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+                micStream = null;
+            }
+            if (audioFileObjectUrl) {
+                try { URL.revokeObjectURL(audioFileObjectUrl); } catch (_) {}
+                audioFileObjectUrl = null;
+            }
             const url = URL.createObjectURL(file);
+            audioFileObjectUrl = url;
             if (audioElement) {
                 try { audioElement.pause(); } catch (_) {}
                 audioElement = null;
@@ -452,17 +945,25 @@
             audioElement.play().catch(() => {});
         }
 
-        function computeAudioBands() {
+        function computeAudioBands(dtMs) {
+            const prof = MODE_PROFILES[experienceMode];
             if (!audioEnabled || !analyser) {
                 bassLevel *= 0.9;
                 midLevel *= 0.9;
                 highLevel *= 0.9;
                 audioLevel *= 0.9;
                 audioFeatures.onset *= 0.9;
+                audioFeatures.bloomEnv *= 0.92;
+                audioFeatures.reformMagnet *= 0.94;
+                audioFeatures.flatness *= 0.9;
+                audioFeatures.spread *= 0.9;
                 return;
             }
-            const data = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(data);
+            if (!fftByteFrequency || fftByteFrequency.length !== analyser.frequencyBinCount) {
+                fftByteFrequency = new Uint8Array(analyser.frequencyBinCount);
+            }
+            analyser.getByteFrequencyData(fftByteFrequency);
+            const data = fftByteFrequency;
             if (!timeDomainData || timeDomainData.length !== analyser.fftSize) {
                 timeDomainData = new Uint8Array(analyser.fftSize);
             }
@@ -497,18 +998,19 @@
             midLevel += (midInstant - midLevel) * smooth;
             highLevel += (highInstant - highLevel) * smooth;
 
-            // Phase 1 feature normalization + auto-gain
-            audioFeatureEnv.bass += (bassLevel - audioFeatureEnv.bass) * 0.01;
-            audioFeatureEnv.mid += (midLevel - audioFeatureEnv.mid) * 0.01;
-            audioFeatureEnv.high += (highLevel - audioFeatureEnv.high) * 0.01;
+            // Slow envelopes (pad / sustain) — mode-specific (blueprint §3.2)
+            audioFeatureEnv.bass += (bassInstant - audioFeatureEnv.bass) * prof.bassSlow;
+            audioFeatureEnv.mid += (midInstant - audioFeatureEnv.mid) * prof.midSlow;
+            audioFeatureEnv.high += (highInstant - audioFeatureEnv.high) * prof.highSlow;
 
             const targetMid = 0.35;
             const desiredGain = targetMid / Math.max(0.08, audioFeatureEnv.mid);
             audioFeatures.autoGain += (desiredGain - audioFeatures.autoGain) * 0.01;
             audioFeatures.autoGain = Math.min(2.5, Math.max(0.5, audioFeatures.autoGain));
-            audioFeatures.bassNorm = Math.min(1, bassLevel * audioFeatures.autoGain);
-            audioFeatures.midNorm = Math.min(1, midLevel * audioFeatures.autoGain);
-            audioFeatures.highNorm = Math.min(1, highLevel * audioFeatures.autoGain);
+            // Normalized bands from slow envelopes (pads/sustain) — §3.2
+            audioFeatures.bassNorm = Math.min(1, audioFeatureEnv.bass * audioFeatures.autoGain);
+            audioFeatures.midNorm = Math.min(1, audioFeatureEnv.mid * audioFeatures.autoGain);
+            audioFeatures.highNorm = Math.min(1, audioFeatureEnv.high * audioFeatures.autoGain);
 
             const mix = 0.6 * bassLevel + 0.3 * midLevel + 0.1 * highLevel;
             audioLevel += (mix - audioLevel) * smooth;
@@ -523,8 +1025,19 @@
             const prevRmsEnv = audioFeatureEnv.rms;
             audioFeatureEnv.rms += (rms - audioFeatureEnv.rms) * 0.04;
             const flux = Math.max(0, rms - prevRmsEnv);
-            audioFeatures.onset += (flux - audioFeatures.onset) * 0.2;
+            // Soft pad path: damp onset spikes when mids are sustained (ambient beds)
+            const padDamp = 1 / (1 + audioFeatureEnv.mid * prof.onsetDampPad);
+            audioFeatures.onset += (flux * padDamp - audioFeatures.onset) * 0.2;
             audioFeatures.rms = audioFeatureEnv.rms;
+
+            // §4.2 Bloom envelope: transient bass above slow sustain; attack/release shaped
+            const transientBass = Math.max(0, bassInstant - audioFeatureEnv.bass);
+            const bloomTarget = Math.min(1, transientBass * 4.8 + audioFeatures.onset * 0.35);
+            const bloomAlpha = bloomTarget > audioFeatures.bloomEnv ? prof.bloomAttack : prof.bloomRelease;
+            audioFeatures.bloomEnv += (bloomTarget - audioFeatures.bloomEnv) * bloomAlpha;
+            // §4.2 Re-form magnet rises after bloom decays (complementary, bounded)
+            const reformTarget = Math.min(1, (1 - audioFeatures.bloomEnv) * (0.55 + audioFeatureEnv.bass * 0.8));
+            audioFeatures.reformMagnet += (reformTarget - audioFeatures.reformMagnet) * prof.reformRate;
 
             let weightedFreq = 0;
             let weightedMag = 0;
@@ -550,14 +1063,67 @@
             audioFeatures.centroid = weightedMag > 0 ? weightedFreq / weightedMag : 0;
             audioFeatures.rolloff = rolloffFreq;
 
-            const bassThreshold = 0.25;
-            if (bassLevel > bassThreshold) {
-                // Softer, clamped bass impulse so particles don't blow out of view
-                bassImpulse += 1.5 * (bassLevel - bassThreshold);
-                if (bassImpulse > 1.0) bassImpulse = 1.0;
-                pulseEnergy += 0.9 * (bassLevel - bassThreshold);
-                if (pulseEnergy > 1.0) pulseEnergy = 1.0;
+            if (window.NebulaX && NebulaX.AudioCore) {
+                audioFeatures.flatness = NebulaX.AudioCore.spectralFlatnessFromBytes(data);
+                audioFeatures.spread = NebulaX.AudioCore.perceptualSpread(data, audioFeatures.centroid, binHz);
+                if (sparkBass) sparkBass.push(bassLevel);
+                if (sparkMid) sparkMid.push(audioFeatures.midNorm);
+                if (sparkFlat) sparkFlat.push(audioFeatures.flatness);
+                if (healthTracker) {
+                    const h = healthTracker.update({
+                        audioEnabled,
+                        rms: audioFeatures.rms,
+                        centroid: audioFeatures.centroid,
+                        dtMs: dtMs || 16,
+                        timeDomain: timeDomainData
+                    });
+                    audioFeatures.healthSilent = h.silent;
+                    audioFeatures.healthClip = h.clipped;
+                    audioFeatures.healthStuck = h.stuckSpectrum;
+                }
             }
+
+            // Pulse from envelope (not raw threshold stacking) — avoids runaway impulses
+            const bloomForPulse = audioFeatures.bloomEnv;
+            bassImpulse = bloomForPulse;
+            pulseEnergy = Math.min(1, bloomForPulse * 1.15 + audioFeatures.onset * 0.35);
+        }
+
+        /** §3.3 — draw ordered samples from circular spark buffer (no alloc). */
+        function drawSparkline(canvas, spark, color, scaleY) {
+            if (!canvas || !spark) return;
+            const buf = spark.getArray();
+            const len = buf.length;
+            const head = spark.head();
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.fillStyle = '#0c0c0c';
+            ctx.fillRect(0, 0, w, h);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            const sy = scaleY != null ? scaleY : 1;
+            for (let i = 0; i < len; i++) {
+                let v;
+                if (head >= len) {
+                    v = buf[(head - len + i + len) % len];
+                } else {
+                    v = i < head ? buf[i] : 0;
+                }
+                v = Math.max(0, Math.min(1, v * sy));
+                const x = (i / Math.max(1, len - 1)) * w;
+                const y = h - 1 - v * (h - 2);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        function drawAllSparklines() {
+            drawSparkline(document.getElementById('spark-bass'), sparkBass, '#0ff', 1);
+            drawSparkline(document.getElementById('spark-mid'), sparkMid, '#f0f', 1);
+            drawSparkline(document.getElementById('spark-flat'), sparkFlat, '#9f9', 1);
         }
 
         function applyPreset() {
@@ -566,17 +1132,70 @@
             if (!p) return;
             params.morphSpeed = p.morphSpeed;
             params.colorSpeed = p.colorSpeed;
-            params.cameraSpeed = p.cameraSpeed;
+            if (p.visualExpress != null) params.visualExpress = p.visualExpress;
             document.getElementById('morphSpeed').value = p.morphSpeed;
             document.getElementById('colorSpeed').value = p.colorSpeed;
-            document.getElementById('cameraSpeed').value = p.cameraSpeed;
+            const veP = document.getElementById('visualExpress');
+            if (veP) veP.value = params.visualExpress != null ? params.visualExpress : 1;
             document.getElementById('fieldStrength').value = params.flowStrength;
         }
 
+        function syncSlidersFromParams() {
+            const ms = document.getElementById('morphSpeed');
+            const cs = document.getElementById('colorSpeed');
+            const ve = document.getElementById('visualExpress');
+            const fs = document.getElementById('fieldStrength');
+            const pt = document.getElementById('particleTier');
+            if (ms) ms.value = params.morphSpeed;
+            if (cs) cs.value = params.colorSpeed;
+            if (ve) ve.value = params.visualExpress != null ? params.visualExpress : 1;
+            if (fs) fs.value = params.flowStrength;
+            if (pt) pt.value = localStorage.getItem(STORAGE_PARTICLE_TIER) || 'standard';
+        }
+
+        function saveBeastProfile() {
+            if (!window.NebulaX || !NebulaX.UserProfile) return;
+            const presetEl = document.getElementById('preset');
+            const ok = NebulaX.UserProfile.save({
+                params: { ...params },
+                experienceMode,
+                paletteMode,
+                narrativeEnabled,
+                particleTier: (document.getElementById('particleTier') || {}).value || 'standard',
+                preset: presetEl ? presetEl.value : 'calm'
+            });
+            setRecordStatus(ok ? 'Beast profile saved.' : 'Save failed.');
+            if (ok && NebulaX.CreatorPresets && NebulaX.CreatorPresets.logSession) {
+                NebulaX.CreatorPresets.logSession({ event: 'profile_save' });
+            }
+        }
+
+        function loadBeastProfile() {
+            if (!window.NebulaX || !NebulaX.UserProfile) return;
+            const p = NebulaX.UserProfile.load();
+            if (!p || !p.params) {
+                setRecordStatus('No saved profile.');
+                return;
+            }
+            localStorage.setItem(STORAGE_PARTICLE_TIER, p.particleTier || 'standard');
+            localStorage.setItem(STORAGE_NARRATIVE, String(p.narrativeEnabled !== false));
+            sessionStorage.setItem('nebula-x-profile-apply', JSON.stringify(p));
+            location.reload();
+        }
+
+        function toggleHelpOverlay() {
+            helpOverlayVisible = !helpOverlayVisible;
+            const el = document.getElementById('help-overlay');
+            if (el) {
+                el.classList.toggle('visible', helpOverlayVisible);
+                el.setAttribute('aria-hidden', helpOverlayVisible ? 'false' : 'true');
+            }
+        }
+
         function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            if (window.NebulaX && NebulaX.RenderCore && camera && renderer) {
+                NebulaX.RenderCore.resize(camera, renderer, window.innerWidth, window.innerHeight);
+            }
         }
 
         function setRecordStatus(text) {
@@ -640,12 +1259,26 @@
                 a.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 10_000);
                 setRecordStatus('Saved .webm download.');
+                if (window.NebulaX && NebulaX.CreatorPresets) {
+                    NebulaX.CreatorPresets.logSession({ event: 'record_stop', mime: recorder.mimeType });
+                }
             };
 
             recorder.start(1000); // 1s chunks keeps memory stable for long takes
             document.getElementById('btnRecord').disabled = true;
             document.getElementById('btnStopRecord').disabled = false;
             setRecordStatus('Recording… (R to stop)');
+
+            if (window.NebulaX && NebulaX.CreatorPresets) {
+                NebulaX.CreatorPresets.logSession({
+                    event: 'record_start',
+                    pack: document.getElementById('creatorPack') ? document.getElementById('creatorPack').value : 'custom',
+                    experienceMode,
+                    paletteMode,
+                    narrativeEnabled,
+                    params: { ...params }
+                });
+            }
 
             // Hide HUD automatically while recording so it never appears in the capture
             if (hudVisible) toggleHUD();
@@ -659,162 +1292,195 @@
             setRecordStatus('Finalizing…');
         }
 
-        function animate() {
+        function animate(now) {
             requestAnimationFrame(animate);
+            const wallMs = now !== undefined ? now : performance.now();
+            if (document.hidden) {
+                if (wallMs - lastIdleFrameMs < 500) return;
+                lastIdleFrameMs = wallMs;
+            } else {
+                lastIdleFrameMs = -Infinity;
+            }
+            const realDt = lastFrameWallMs ? Math.min(0.1, (wallMs - lastFrameWallMs) / 1000) : 0;
+            lastFrameWallMs = wallMs;
+            visualWallTime += realDt;
 
-            computeAudioBands();
+            computeAudioBands(realDt * 1000);
 
             // Continuous mode: decouple motion speed from audio to avoid lurching.
             const dt = 0.005 * params.morphSpeed;
             time += dt;
-            const timeline = getTimelineState(dt);
-
-            // Stronger decay so any bass push settles quickly
-            bassImpulse *= 0.85;
-            pulseEnergy *= 0.9;
+            // Slow irrational drift so paths don't sit on one repeating sinusoid forever (blueprint §4.1).
+            const flowDrift =
+                Math.sin(visualWallTime * 0.017 + sessionSeed * 0.001) * 14
+                + Math.cos(visualWallTime * 0.011 + morphPhaseOffset) * 9
+                + Math.sin(visualWallTime * 0.023 + colorWaveOffset * 0.4) * 5;
+            const flowTime = time + flowTimeOffset + flowDrift * 0.001;
 
             mouse.x += (targetMouse.x - mouse.x) * 0.05;
             mouse.y += (targetMouse.y - mouse.y) * 0.05;
-            // Continuous mode: disable macro/timeline zoom breathing (it can feel like lurching).
-            zoomDistance += (targetZoom - zoomDistance) * 0.04;
 
-            const posAttr = geometry.attributes.position;
-            const sizeAttr = geometry.attributes.size;
-            const colAttr = geometry.attributes.color;
-            const colorTool = new THREE.Color();
+            const mode = MODE_PROFILES[experienceMode];
 
-            const camSpeed = time * 0.09 * params.cameraSpeed;
-            camera.position.x = Math.sin(camSpeed) * (zoomDistance * 0.5) + mouse.x;
-            camera.position.y = Math.cos(camSpeed * PI) * (zoomDistance * 0.3) - mouse.y;
-            camera.position.z = zoomDistance;
-            camera.lookAt(0, 0, 0);
+            if (narrativeEnabled) {
+                const spd = 1 + (audioEnabled ? 0.048 * audioFeatures.midNorm : 0);
+                narrativeTime += realDt * spd;
+            }
+            const narrSample = sampleNarrative(narrativeTime);
+            const nu = narrSample.u;
 
-            // Morph driven by time, nudged by mid band
-            const baseMorph1 = (Math.sin(time * 0.3 * PHI) + 1) / 2;
-            const baseMorph2 = (Math.cos(time * 0.2 * PI) + 1) / 2;
-            const midInfluence = 0.6 * midLevel;
-            const morphFactor1 = baseMorph1 * (1 - midInfluence) + midInfluence * midLevel;
-            const morphFactor2 = baseMorph2 * (1 - midInfluence) + midInfluence * midLevel;
+            // Palette: equal real-time segments (default 20s wall clock), ordered cycle (blueprint §6).
+            const paletteSegs = getPaletteSegments(paletteMode);
+            const paletteLen = paletteSegs.length;
+            const segDur = (PALETTE_SEGMENT_SEC * PALETTE_ARC_MULT) / Math.max(0.25, params.colorSpeed);
+            paletteSegmentElapsed += realDt;
+            while (paletteSegmentElapsed >= segDur) {
+                paletteSegmentElapsed -= segDur;
+                paletteSegmentIndex = (paletteSegmentIndex + 1) % paletteLen;
+            }
+            const segT = Math.min(1, paletteSegmentElapsed / segDur);
+            const segCur = paletteSegs[paletteSegmentIndex % paletteLen];
+            const segNext = paletteSegs[(paletteSegmentIndex + 1) % paletteLen];
+            const paletteHueLerp = hueShortestLerp(segCur.h, segNext.h, segT);
+            const paletteWhiteBlend = THREE.MathUtils.lerp(segCur.white, segNext.white, segT);
 
-            // Neon palette driver: global hue + traveling delayed wave through the particle field.
-            const baseHue = (time * 0.03 * params.colorSpeed + audioLevel * 0.06) % 1;
-            const colorWavePhase = time * 0.9 * params.colorSpeed;
+            const paletteHueShifted = narrativeEnabled
+                ? ((paletteHueLerp + nu.hueShift) % 1 + 1) % 1
+                : paletteHueLerp;
 
-            for (let i = 0; i < particleCount; i++) {
-                const i3 = i * 3;
-
-                const targetX = THREE.MathUtils.lerp(cloudPos[i3], ringPos[i3], morphFactor1);
-                const targetY = THREE.MathUtils.lerp(cloudPos[i3+1], ringPos[i3+1], morphFactor1);
-                const targetZ = THREE.MathUtils.lerp(cloudPos[i3+2], ringPos[i3+2], morphFactor1);
-
-                const finalX = THREE.MathUtils.lerp(targetX, spherePos[i3], morphFactor2);
-                const finalY = THREE.MathUtils.lerp(targetY, spherePos[i3+1], morphFactor2);
-                const finalZ = THREE.MathUtils.lerp(targetZ, spherePos[i3+2], morphFactor2);
-
-                // Base position before fields
-                let fx = finalX;
-                let fy = finalY;
-                let fz = finalZ;
-
-                // Gravity well around cursor (project cursor into scene plane z=0)
-                const cursorX = mouse.x;
-                const cursorY = -mouse.y;
-                const dx = cursorX - fx;
-                const dy = cursorY - fy;
-                const dz = 0 - fz;
-                const r2 = dx * dx + dy * dy + dz * dz + 50;
-                // Phase 2 Step 2:
-                // Magnet cohesion tied to normalized bass + onset.
-                // This increases "re-form" pressure when low-end energy is active.
-                const magnetDrive = Math.min(1, audioFeatures.bassNorm * 0.8 + audioFeatures.onset * 4.0);
-                const gStrength = gravityBaseStrength * params.gravityStrength * (0.6 + magnetDrive * 1.4);
-                const gScale = gStrength / r2;
-                fx += dx * gScale;
-                fy += dy * gScale;
-                fz += dz * gScale;
-
-                // Phase 2 Step 1:
-                // Pad-driven smooth flow (uses normalized mids from Phase 1 audio core).
-                const flowBase = params.flowStrength * (0.35 + audioFeatures.midNorm * 0.65);
-                const n = Math.sin(fx * 0.0005 + time * 0.35) * Math.cos(fz * 0.0004 + time * 0.25);
-                const flowDirX = Math.cos(time * 0.06) + (mouse.x / 450);
-                const flowDirZ = Math.sin(time * 0.08) + (mouse.y / 450);
-                fx += flowDirX * n * 9 * flowBase;
-                fz += flowDirZ * n * 9 * flowBase;
-
-                // Bass-driven radial impulse (scale & outward push)
-                const radialDirX = fx;
-                const radialDirY = fy;
-                const radialDirZ = fz;
-                const radialLen = Math.sqrt(radialDirX * radialDirX + radialDirY * radialDirY + radialDirZ * radialDirZ) + 1e-3;
-                // Slightly stronger but bounded outward bloom on low-end activity
-                const bloomDrive = Math.min(1, audioFeatures.bassNorm * 0.7 + audioFeatures.onset * 3.0);
-                const radialScale = 1 + bloomDrive * 0.16;
-
-                // Much smaller outward push so particles don't scatter off-screen
-                const baseX = fx * radialScale + (radialDirX / radialLen) * bassImpulse * 8;
-                const baseY = fy * radialScale + (radialDirY / radialLen) * bassImpulse * 8;
-                const baseZ = fz * radialScale + (radialDirZ / radialLen) * bassImpulse * 8;
-
-                const highJitter = 1 + highLevel * 3;
-                // Hook behavior: contraction then bloom on stronger moments, with smooth return.
-                const pulse = Math.min(1, pulseEnergy * 1.4);
-                const contract = pulse * 0.06; // slight pull-in
-                const bloom = pulse * 0.18;    // bigger outward bloom
-                const pulseScale = 1 - contract + bloom;
-
-                posAttr.array[i3] = (baseX * pulseScale) + Math.sin(time + phases[i]) * 10 * highJitter;
-                posAttr.array[i3+1] = (baseY * pulseScale) + Math.cos(time + phases[i]) * 10 * highJitter;
-                posAttr.array[i3+2] = (baseZ * pulseScale) + Math.sin(time * 0.5 + phases[i]) * 10 * highJitter;
-
-                const densityMask = 1;
-
-                // Delayed color wave (shoal-like): nearby particles shift together, farther ones lag.
-                const radius = Math.sqrt(baseX * baseX + baseY * baseY + baseZ * baseZ);
-                const colorDelay = radius * 0.01 + phases[i] * 0.6;
-                const colorWave = 0.5 + 0.5 * Math.sin(colorWavePhase - colorDelay);
-
-                let hue;
-                let saturation;
-                let lightness;
-                if (paletteMode === 'cyberpunk') {
-                    // Cyberpunk: hot pink -> electric orange -> acid yellow
-                    const hotPink = 0.91;
-                    const electricOrange = 0.08;
-                    const acidYellow = 0.15;
-                    hue = hotPink * (1 - colorWave) + electricOrange * colorWave;
-                    hue = hue * (1 - highLevel * 0.4) + acidYellow * (highLevel * 0.4);
-                    hue = ((hue + baseHue * 0.06) % 1 + 1) % 1;
-                    saturation = Math.min(1, Math.max(0, 0.92 + colorWave * 0.07 + highLevel * 0.08));
-                    lightness = Math.min(1, Math.max(0, 0.50 + colorWave * 0.10 + audioLevel * 0.09 + bassLevel * 0.03));
-                } else {
-                    // Reactor Core: deep crimson -> burnt orange -> gold
-                    const crimson = 0.98;
-                    const burntOrange = 0.06;
-                    const gold = 0.12;
-                    hue = crimson * (1 - colorWave) + burntOrange * colorWave;
-                    hue = hue * (1 - highLevel * 0.35) + gold * (highLevel * 0.35);
-                    hue = ((hue + baseHue * 0.05) % 1 + 1) % 1;
-                    saturation = Math.min(1, Math.max(0, 0.86 + colorWave * 0.10 + highLevel * 0.05));
-                    lightness = Math.min(1, Math.max(0, 0.42 + colorWave * 0.12 + audioLevel * 0.10 + bassLevel * 0.05));
+            // Visible mode look + narrative §7 (uniform crossfade, no hard cuts)
+            if (narrativeEnabled) {
+                fogTargetScratch.setHex(mode.fogColor);
+                narrColorA.setHex(nu.fogColor);
+                fogTargetScratch.lerp(narrColorA, NARRATIVE_BLEND_INTO_MODE);
+                fogColorCurrent.lerp(fogTargetScratch, 0.04);
+                const densTarget = THREE.MathUtils.lerp(mode.fogDensity, nu.fogDensity, NARRATIVE_BLEND_INTO_MODE);
+                scene.fog.density += (densTarget - scene.fog.density) * 0.04;
+            } else {
+                fogTargetScratch.setHex(mode.fogColor);
+                fogColorCurrent.lerp(fogTargetScratch, 0.04);
+                scene.fog.density += (mode.fogDensity - scene.fog.density) * 0.04;
+            }
+            scene.fog.color.copy(fogColorCurrent);
+            if (renderer && renderer.domElement) {
+                const veF = params.visualExpress != null ? params.visualExpress : 1;
+                let filt = mode.canvasFilter;
+                if (audioEnabled && audioFeatures) {
+                const br = 1 + audioFeatures.rms * 0.08 * Math.min(2, veF);
+                const sat = 1 + audioFeatures.bloomEnv * 0.1 * veF;
+                    filt = `${mode.canvasFilter} brightness(${br.toFixed(3)}) saturate(${sat.toFixed(3)})`;
                 }
-                colorTool.setHSL(hue, saturation, lightness);
-
-                colAttr.array[i3] = colorTool.r;
-                colAttr.array[i3+1] = colorTool.g;
-                colAttr.array[i3+2] = colorTool.b;
-
-                const twinkle = 0.7
-                    + Math.sin(time * 4 + phases[i]) * (0.2 + highLevel * 0.5)
-                    + audioLevel * 0.1;
-                sizeAttr.array[i] = sizes[i] * Math.max(0.3, twinkle) * densityMask;
+                renderer.domElement.style.filter = filt;
             }
 
-            posAttr.needsUpdate = true;
-            sizeAttr.needsUpdate = true;
-            colAttr.needsUpdate = true;
+            // Fixed camera — only particles move (mouse still drives sim, not the view).
+            camera.position.set(0, 0, CAMERA_DISTANCE);
+            camera.lookAt(0, 0, 0);
 
-            points.rotation.y += 0.001;
+            // Morph driven by time + session offsets (avoids identical motion every run; blueprint §4.1).
+            const veM = params.visualExpress != null ? params.visualExpress : 1;
+            const baseMorph1 = (Math.sin(flowTime * 0.3 * PHI * veM + morphPhaseOffset) + 1) / 2;
+            const baseMorph2 = (Math.cos(flowTime * 0.2 * PI * veM + morphPhaseOffset * 0.7) + 1) / 2;
+            // Pad-driven morph authority uses slow mid envelope (§4.2)
+            const midDrive = THREE.MathUtils.lerp(midLevel, audioFeatureEnv.mid, 0.72);
+            const midInfluence = 0.62 * midDrive * (0.82 + 0.18 * veM);
+            let morphFactor1 = baseMorph1 * (1 - midInfluence) + midInfluence * midDrive;
+            let morphFactor2 = baseMorph2 * (1 - midInfluence) + midInfluence * midDrive;
+            if (narrativeEnabled) {
+                morphFactor1 = Math.min(1, Math.max(0, morphFactor1 + nu.morphRingBias * 0.88));
+                morphFactor2 = Math.min(1, Math.max(0, morphFactor2 + nu.morphSphereBias * 0.88));
+            }
+
+            const colorWavePhase = flowTime * 0.9 * params.colorSpeed + colorWaveOffset;
+
+            const elNarrTitle = document.getElementById('narrative-title');
+            const elNarrSub = document.getElementById('narrative-sub');
+            const elNarrBar = document.getElementById('narrative-bar');
+            if (elNarrTitle) elNarrTitle.textContent = narrativeEnabled ? nu.name : 'Narrative off';
+            if (elNarrSub) {
+                const cycle = narrativeTimeline.total;
+                const rem = cycle > 0 ? (narrativeTime % cycle) : 0;
+                elNarrSub.textContent = narrativeEnabled
+                    ? `${narrSample.sub} · ${rem.toFixed(0)}s / ${cycle.toFixed(0)}s`
+                    : 'Press N to enable long-form scenes (loops forever).';
+            }
+            if (elNarrBar) elNarrBar.style.width = narrativeEnabled ? `${Math.min(100, narrSample.progress * 100)}%` : '0%';
+
+            const simCtx = {
+                THREE,
+                renderer,
+                particleCount,
+                geometry,
+                points,
+                pointsGlow,
+                glowMaterial,
+                pointsMaterial,
+                PI,
+                PHI,
+                mode,
+                params,
+                mouse,
+                flowTime,
+                morphPhaseOffset,
+                cameraPhaseOffset,
+                colorWavePhase,
+                gravityBaseStrength,
+                audioFeatures,
+                audioLevel,
+                bassLevel,
+                midLevel,
+                highLevel,
+                bassImpulse,
+                pulseEnergy,
+                phases,
+                cloudPos,
+                ringPos,
+                spherePos,
+                sizes,
+                morphFactor1,
+                morphFactor2,
+                paletteHueShifted,
+                paletteWhiteBlend,
+                paletteMode,
+                narrativeEnabled,
+                nu,
+                particleSizeSmoothed
+            };
+
+            if (gpuParticleMode && window.NebulaX && NebulaX.GpuPointsMaterial) {
+                const veG = params.visualExpress != null ? params.visualExpress : 1;
+                const sizeTarget =
+                    4.5 * mode.globalPointScale *
+                    (1 + audioFeatures.bloomEnv * 0.48 * veG + audioFeatures.onset * 0.2 * veG);
+                particleSizeSmoothed += (sizeTarget - particleSizeSmoothed) * 0.12;
+                simCtx.particleSizeSmoothed = particleSizeSmoothed;
+                NebulaX.GpuPointsMaterial.updateGpuUniforms(pointsMaterial, simCtx);
+                points.scale.setScalar(mode.globalPointScale);
+                points.rotation.y +=
+                    0.00035 * veG * (1 + audioFeatures.bloomEnv * 1.2 + audioFeatures.midNorm * 0.45);
+                if (pointsGlow && glowMaterial) {
+                    pointsGlow.scale.copy(points.scale);
+                    pointsGlow.rotation.copy(points.rotation);
+                    const gSz =
+                        particleSizeSmoothed *
+                        (2.25 + audioFeatures.bloomEnv * 1.35 * veG + audioFeatures.onset * 0.75 * veG);
+                    glowMaterial.size = Math.min(52, Math.max(9, gSz));
+                    glowMaterial.opacity = Math.min(
+                        0.62,
+                        0.26 + audioFeatures.bloomEnv * 0.28 * veG + audioFeatures.onset * 0.12
+                    );
+                }
+            } else if (window.NebulaX && NebulaX.SimulationCore) {
+                const simOut = NebulaX.SimulationCore.updateParticleFrame(simCtx);
+                particleSizeSmoothed = simOut.particleSizeSmoothed;
+            }
+
+            const barB = document.getElementById('bar-bloom');
+            const barR = document.getElementById('bar-reform');
+            if (barB) barB.style.width = `${Math.min(100, audioFeatures.bloomEnv * 100)}%`;
+            if (barR) barR.style.width = `${Math.min(100, audioFeatures.reformMagnet * 100)}%`;
+
+            drawAllSparklines();
 
             if (debugVisible) {
                 debugTick++;
@@ -822,23 +1488,43 @@
                     const debugPanel = document.getElementById('debug-panel');
                     if (debugPanel) {
                         const filePlaying = !!(audioElement && !audioElement.paused && !audioElement.ended);
+                        const SM = window.NebulaX && NebulaX.StabilityMonitor;
+                        const memMb = SM && SM.getMemoryHint ? SM.getMemoryHint() : null;
                         debugPanel.textContent =
-`AUDIO CORE (PHASE 1)
+`AUDIO CORE (§3) + health
+fps: ${SM && SM.getFPS ? SM.getFPS().toFixed(0) : '-'}  particles: ${particleCount}
 audioEnabled: ${audioEnabled}
 filePlaying: ${filePlaying}
-palette: ${paletteMode}
+tabHidden: ${document.hidden}
+palette: ${paletteMode}  arc×${PALETTE_ARC_MULT}  seg~${((PALETTE_SEGMENT_SEC * PALETTE_ARC_MULT) / Math.max(0.25, params.colorSpeed)).toFixed(0)}s
+mode: ${experienceMode}
+gpuParticles: ${gpuParticleMode ? 'vertex shader' : 'CPU'}
+narrative: ${narrativeEnabled ? 'ON' : 'OFF'}  scene: ${narrativeEnabled ? nu.name : '-'}
+
+§1.2 TELEMETRY (audio→visual drivers — envelopes only)
+time dt: morphSpeed slider only (no raw FFT); camera fixed
+flow/morph: midNorm, bloomEnv, reformMagnet, onset (smoothed)
+narrative dt: ×(1+0.048*midNorm) when audio on — mild nudge only
+pulse/shimmer: pulseEnergy from bloom+onset envelopes
 
 raw bands  b:${bassLevel.toFixed(3)} m:${midLevel.toFixed(3)} h:${highLevel.toFixed(3)}
 norm bands b:${audioFeatures.bassNorm.toFixed(3)} m:${audioFeatures.midNorm.toFixed(3)} h:${audioFeatures.highNorm.toFixed(3)}
+flatness: ${audioFeatures.flatness.toFixed(3)} spread: ${audioFeatures.spread.toFixed(3)}
+health silent:${audioFeatures.healthSilent} clip:${audioFeatures.healthClip} stuck:${audioFeatures.healthStuck}
+bloomEnv: ${audioFeatures.bloomEnv.toFixed(3)} reform: ${audioFeatures.reformMagnet.toFixed(3)}
 rms: ${audioFeatures.rms.toFixed(4)} onset: ${audioFeatures.onset.toFixed(4)}
 centroid: ${audioFeatures.centroid.toFixed(1)}Hz
 rolloff85: ${audioFeatures.rolloff.toFixed(1)}Hz
 autoGain: ${audioFeatures.autoGain.toFixed(3)}
 audioLevel: ${audioLevel.toFixed(3)}
+${memMb != null ? `JS heap ~${memMb} MB` : ''}
+ctxLost: ${SM && SM.isContextLost ? SM.isContextLost() : false}
 `;
                     }
                 }
             }
+
+            if (window.NebulaX && NebulaX.StabilityMonitor) NebulaX.StabilityMonitor.tickFrame();
 
             renderer.render(scene, camera);
         }

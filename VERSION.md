@@ -3,12 +3,16 @@ Nebula X Visual – Version History
 
 Current stable fallbacks:
 
+- **v6** (current)
+  - **Description**: Modular `js/` pipeline + optional **GPU vertex** particles (`gpu-points-material.js`), **CPU default**; **particle tiers** Lite/Standard/Beast (40k–200k); **Save/Load profile** (`user-profile.js`); **`?`** help overlay; **FPS** in debug (`StabilityMonitor.getFPS`); session log export; GPU init fallback. **Fixed camera** (no orbit, no zoom) — motion reads from **particles only**; **Camera** slider removed; metadata + favicon polish.
+  - **Git commit**: *(set when tagged)*
+
 - **v5**
   - **Git commit**: 6f741c3
   - **Description**: Continuous-flow edition with:
     - v4 capture features (HUD hide, fullscreen, recorder)
     - Motion speed decoupled from audio for smooth waves
-    - Camera zoom breathing disabled; only gentle user-driven zoom
+    - Fixed camera distance (no scroll/arrow zoom or audio dolly on Z)
     - Softer gravity/flow for non-lurchy ambient motion
 
 - **v4**
